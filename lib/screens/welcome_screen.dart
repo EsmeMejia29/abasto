@@ -1,9 +1,18 @@
+// En lib/screens/welcome_screen.dart:
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
-import '../main.dart';
+import '../config/session_manager.dart';
+import 'auth_screen.dart'; // <-- IMPORTA AUTH SCREEN
 
-class WelcomeScreen extends StatelessWidget {
+class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
+
+  @override
+  State<WelcomeScreen> createState() => _WelcomeScreenState();
+}
+
+class _WelcomeScreenState extends State<WelcomeScreen> {
+  UserRole _selectedRole = UserRole.restaurant;
 
   @override
   Widget build(BuildContext context) {
@@ -14,80 +23,65 @@ class WelcomeScreen extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 24.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const Spacer(),
-
-              // Logo de Abasto
               Center(
                 child: Image.asset(
                   'assets/images/logo.jpeg',
-                  height: 120,
+                  height: 110,
                   fit: BoxFit.contain,
-                  errorBuilder: (context, error, stackTrace) => Column(
-                    children: const [
-                      Icon(Icons.storefront, size: 80, color: AppColors.primaryBlue),
-                      SizedBox(height: 8),
-                      Text(
-                        'ABASTO',
-                        style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.navyDark,
-                        ),
-                      ),
-                    ],
+                  errorBuilder: (context, error, stackTrace) =>
+                      const Icon(Icons.storefront, size: 70, color: AppColors.primaryBlue),
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'Plataforma B2B de Abastecimiento',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.navyDark),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Selecciona tu tipo de perfil para continuar:',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: AppColors.subtitleGrey),
+              ),
+              const SizedBox(height: 20),
+
+              SegmentedButton<UserRole>(
+                segments: const [
+                  ButtonSegment(
+                    value: UserRole.restaurant,
+                    label: Text('Restaurante'),
+                    icon: Icon(Icons.restaurant),
                   ),
-                ),
-              ),
-
-              const SizedBox(height: 28),
-
-              // Título y lema de la propuesta de valor
-              const Text(
-                'El canal directo entre restaurantes y distribuidores',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.navyDark,
-                  height: 1.3,
-                ),
-              ),
-
-              const SizedBox(height: 12),
-
-              const Text(
-                'Automatiza tus pedidos de insumos perecederos y accede a financiamiento en cuotas para cuidar tu flujo de caja.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: AppColors.subtitleGrey,
-                  height: 1.4,
-                ),
+                  ButtonSegment(
+                    value: UserRole.supplier,
+                    label: Text('Distribuidor'),
+                    icon: Icon(Icons.local_shipping),
+                  ),
+                ],
+                selected: {_selectedRole},
+                onSelectionChanged: (newSelection) {
+                  setState(() {
+                    _selectedRole = newSelection.first;
+                  });
+                },
               ),
 
               const Spacer(),
 
-              // Botón principal para ingresar a la plataforma
               SizedBox(
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primaryBlue,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    elevation: 2,
-                  ),
+                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryBlue),
                   onPressed: () {
-                    // Navega a la navegación principal (Home, Pedidos, Crédito)
-                    Navigator.pushReplacement(
+                    // Navega a la pantalla de Login / Registro pasando el rol elegido
+                    Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const MainNavigationHolder(),
+                        builder: (context) => AuthScreen(initialRole: _selectedRole),
                       ),
                     );
                   },
@@ -95,21 +89,14 @@ class WelcomeScreen extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
-                        'Comenzar',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        'Continuar',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
                       ),
                       SizedBox(width: 8),
-                      Icon(Icons.arrow_forward, size: 20),
+                      Icon(Icons.arrow_forward, size: 20, color: Colors.white),
                     ],
                   ),
                 ),
-              ),
-
-              const SizedBox(height: 16),
-
-              const Text(
-                'Santa Tecla & Zona Metropolitana • El Salvador',
-                style: TextStyle(fontSize: 11, color: Colors.grey),
               ),
             ],
           ),

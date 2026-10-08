@@ -39,14 +39,33 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<List<Supplier>> _fetchSuppliers() async {
-    // Consulta con join a la tabla profiles para obtener nombre comercial
-    final response = await supabase
+    // 1. Obtener los detalles de todos los proveedores
+    final suppliersData = await supabase
         .from('supplier_details')
-        .select('*, profiles(business_name)');
+        .select('*');
 
-    return (response as List<dynamic>)
-        .map((e) => Supplier.fromMap(e as Map<String, dynamic>))
-        .toList();
+    final list = suppliersData as List<dynamic>;
+    if (list.isEmpty) return [];
+
+    // 2. Obtener los nombres comerciales desde profiles
+    final profileIds = list.map((s) => s['profile_id'].toString()).toSet().toList();
+    final profilesData = await supabase
+        .from('profiles')
+        .select('id, business_name')
+        .filter('id', 'in', profileIds);
+
+    final nameMap = <String, String>{};
+    for (var prof in profilesData as List<dynamic>) {
+      nameMap[prof['id'].toString()] = prof['business_name'] ?? 'Proveedor';
+    }
+
+    // 3. Mapear cada proveedor con su nombre
+    return list.map((s) {
+      final sMap = Map<String, dynamic>.from(s as Map);
+      final pId = sMap['profile_id']?.toString() ?? '';
+      sMap['profiles'] = {'business_name': nameMap[pId] ?? 'Distribuidor de Alimentos'};
+      return Supplier.fromMap(sMap);
+    }).toList();
   }
 
   @override

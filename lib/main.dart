@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config/supabase_config.dart';
+import 'config/session_manager.dart';
 import 'theme/app_theme.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/orders_screen.dart';
-import 'screens/crm_screen.dart'; // <-- Reemplaza financing_screen
+import 'screens/inventory_screen.dart'; // <-- MI INVENTARIO
+import 'screens/profile_screen.dart';
+import 'screens/supplier/supplier_incoming_orders_screen.dart';
+import 'screens/supplier/supplier_inventory_screen.dart';
 
 final supabase = Supabase.instance.client;
 
@@ -44,40 +48,33 @@ class MainNavigationHolder extends StatefulWidget {
 class _MainNavigationHolderState extends State<MainNavigationHolder> {
   int _currentIndex = 0;
 
-  final List<Widget> _screens = const [
-    HomeScreen(),
-    OrdersScreen(),
-    CrmScreen(), // <-- Pestaña del CRM
-  ];
-
   @override
   Widget build(BuildContext context) {
+    final isRestaurant = SessionManager.currentRole.value == UserRole.restaurant;
+
+    final List<Widget> screens = isRestaurant
+        ? const [HomeScreen(), OrdersScreen(), InventoryScreen(), ProfileScreen()]
+        : const [SupplierIncomingOrdersScreen(), SupplierInventoryScreen(), ProfileScreen()];
+
+    final List<NavigationDestination> destinations = isRestaurant
+        ? const [
+            NavigationDestination(icon: Icon(Icons.storefront_outlined), selectedIcon: Icon(Icons.storefront), label: 'Proveedores'),
+            NavigationDestination(icon: Icon(Icons.local_shipping_outlined), selectedIcon: Icon(Icons.local_shipping), label: 'Mis Pedidos'),
+            NavigationDestination(icon: Icon(Icons.inventory_2_outlined), selectedIcon: Icon(Icons.inventory_2), label: 'Mi Inventario'),
+            NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Mi Perfil'),
+          ]
+        : const [
+            NavigationDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: 'Despachos'),
+            NavigationDestination(icon: Icon(Icons.inventory_2_outlined), selectedIcon: Icon(Icons.inventory_2), label: 'Mi Catálogo'),
+            NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Mi Perfil'),
+          ];
+
     return Scaffold(
-      body: _screens[_currentIndex],
+      body: screens[_currentIndex.clamp(0, screens.length - 1)],
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.storefront_outlined),
-            selectedIcon: Icon(Icons.storefront),
-            label: 'Proveedores',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.local_shipping_outlined),
-            selectedIcon: Icon(Icons.local_shipping),
-            label: 'Pedidos',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.contact_phone_outlined),
-            selectedIcon: Icon(Icons.contact_phone),
-            label: 'Mi CRM',
-          ),
-        ],
+        selectedIndex: _currentIndex.clamp(0, destinations.length - 1),
+        onDestinationSelected: (index) => setState(() => _currentIndex = index),
+        destinations: destinations,
       ),
     );
   }
