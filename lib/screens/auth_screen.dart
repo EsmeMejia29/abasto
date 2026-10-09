@@ -3,7 +3,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../main.dart';
 import '../config/session_manager.dart';
 import '../theme/app_theme.dart';
-import '../utils/error_handler.dart'; // <-- IMPORTA EL MANEJADOR DE ERRORES
+import '../utils/error_handler.dart';
+import 'restaurant_onboarding_screen.dart';
+import 'supplier/supplier_onboarding_screen.dart';
 
 class AuthScreen extends StatefulWidget {
   final UserRole initialRole;
@@ -27,6 +29,14 @@ class _AuthScreenState extends State<AuthScreen> {
   void initState() {
     super.initState();
     _role = widget.initialRole;
+  }
+
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    _passwordCtrl.dispose();
+    _businessNameCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _submit() async {
@@ -57,29 +67,10 @@ class _AuthScreenState extends State<AuthScreen> {
     setState(() => _isLoading = true);
 
     try {
-      if (_isLogin) {
-        // Iniciar Sesión con Supabase Auth
-        final res = await supabase.auth.signInWithPassword(
-          email: email,
-          password: password,
-        );
-
-        if (res.user != null) {
-          final prof = await supabase
-              .from('profiles')
-              .select('role')
-              .eq('id', res.user!.id)
-              .maybeSingle();
-
-          if (prof != null) {
-            final roleStr = prof['role'] as String?;
-            SessionManager.switchRole(
-              roleStr == 'supplier' ? UserRole.supplier : UserRole.restaurant,
-            );
-          }
-        }
-      } else {
-        // Registro de nueva cuenta
+      if (!_isLogin) {
+        // ========================================================
+        // 1. FLUJO EXCLUSIVO DE REGISTRO
+        // ========================================================
         final res = await supabase.auth.signUp(
           email: email,
           password: password,
@@ -87,9 +78,11 @@ class _AuthScreenState extends State<AuthScreen> {
 
         final newUserId = res.user?.id;
         if (newUserId != null) {
-          final roleString = _role == UserRole.restaurant ? 'restaurant' : 'supplier';
+          final roleString =
+              _role == UserRole.restaurant ? 'restaurant' : 'supplier';
 
-          await supabase.from('profiles').insert({
+          // Guardar en la tabla base de profiles
+          await supabase.from('profiles').upsert({
             'id': newUserId,
             'email': email,
             'business_name': businessName,
@@ -97,27 +90,130 @@ class _AuthScreenState extends State<AuthScreen> {
             'created_at': DateTime.now().toIso8601String(),
           });
 
+          // Guardar registro inicial en la tabla correspondiente
           if (_role == UserRole.restaurant) {
-            await supabase.from('restaurant_details').insert({
+            await supabase.from('restaurant_details').upsert({
               'profile_id': newUserId,
               'branch_count': 1,
               'monthly_budget': 500.0,
+              'onboarding_completed': false,
             });
           } else {
-            await supabase.from('supplier_details').insert({
+            await supabase.from('supplier_details').upsert({
               'profile_id': newUserId,
               'category': 'Distribución General',
               'delivery_coverage': 'Área Metropolitana',
               'delivery_days': 'Lunes a Viernes',
               'rating': 5.0,
               'reviews_count': 0,
+              'onboarding_completed': false,
             });
           }
+        }
 
-          SessionManager.switchRole(_role);
+        // Cerrar la sesión activa generada por el registro
+          await supabase.auth.signOut();
+
+          if (mounted) {
+            setState(() {
+              _isLogin = true;
+              _passwordCtrl.clear();
+              _businessNameCtrl.clear();
+            });
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '¡Cuenta registrada con éxito!',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Hemos enviado un enlace a $email. Revisa tu bandeja de entrada o spam para confirmar tu correo antes de ingresar.',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
+                backgroundColor: AppColors.tealMint,
+                behavior: SnackBarBehavior.floating,
+                duration: const Duration(seconds: 6),
+              ),
+            );
+          }
+          return;
+      }
+
+      // ========================================================
+      // 2. FLUJO EXCLUSIVO DE INICIO DE SESIÓN
+      // ========================================================
+      final res = await supabase.auth.signInWithPassword(
+        email: email,
+        password: password,
+      );
+
+      final currentUserId = res.user?.id;
+      if (currentUserId != null) {
+        final prof = await supabase
+            .from('profiles')
+            .select('role')
+            .eq('id', currentUserId)
+            .maybeSingle();
+
+        if (prof != null) {
+          final roleStr = prof['role'] as String?;
+          final userRole =
+              roleStr == 'supplier' ? UserRole.supplier : UserRole.restaurant;
+          SessionManager.switchRole(userRole);
+          _role = userRole;
+        }
+
+        // Verificación de Onboarding
+        if (_role == UserRole.restaurant) {
+          final restDetails = await supabase
+              .from('restaurant_details')
+              .select('onboarding_completed')
+              .eq('profile_id', currentUserId)
+              .maybeSingle();
+
+          final bool completed = restDetails?['onboarding_completed'] ?? false;
+          if (!completed && mounted) {
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(
+                builder: (context) =>
+                    RestaurantOnboardingScreen(restaurantId: currentUserId),
+              ),
+              (route) => false,
+            );
+            return;
+          }
+        } else if (_role == UserRole.supplier) {
+          final suppDetails = await supabase
+              .from('supplier_details')
+              .select('onboarding_completed')
+              .eq('profile_id', currentUserId)
+              .maybeSingle();
+
+          final bool completed = suppDetails?['onboarding_completed'] ?? false;
+          if (!completed && mounted) {
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(
+                builder: (context) =>
+                    SupplierOnboardingScreen(supplierId: currentUserId),
+              ),
+              (route) => false,
+            );
+            return;
+          }
         }
       }
 
+      // Solo si el login fue exitoso y el onboarding ya está completado
       if (mounted) {
         Navigator.pushAndRemoveUntil(
           context,
@@ -127,7 +223,6 @@ class _AuthScreenState extends State<AuthScreen> {
       }
     } catch (e) {
       if (mounted) {
-        // Traducción limpia de cualquier excepción técnica a español
         final friendlyMessage = ErrorHandler.parse(e);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -144,7 +239,8 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final roleName = _role == UserRole.restaurant ? 'Restaurante' : 'Distribuidor';
+    final roleName =
+        _role == UserRole.restaurant ? 'Restaurante' : 'Distribuidor';
 
     return Scaffold(
       appBar: AppBar(
@@ -227,11 +323,18 @@ class _AuthScreenState extends State<AuthScreen> {
                       ? const SizedBox(
                           width: 20,
                           height: 20,
-                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
                         )
                       : Text(
                           _isLogin ? 'Iniciar Sesión' : 'Completar Registro',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
                         ),
                 ),
               ),
@@ -244,7 +347,10 @@ class _AuthScreenState extends State<AuthScreen> {
                     _isLogin
                         ? '¿No tienes cuenta? Regístrate aquí'
                         : '¿Ya tienes cuenta? Inicia sesión',
-                    style: const TextStyle(color: AppColors.primaryBlue, fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                      color: AppColors.primaryBlue,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),

@@ -6,7 +6,7 @@ import 'theme/app_theme.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/orders_screen.dart';
-import 'screens/inventory_screen.dart'; // <-- MI INVENTARIO
+import 'screens/inventory_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/supplier/supplier_incoming_orders_screen.dart';
 import 'screens/supplier/supplier_inventory_screen.dart';
@@ -53,8 +53,8 @@ class _MainNavigationHolderState extends State<MainNavigationHolder> {
     final isRestaurant = SessionManager.currentRole.value == UserRole.restaurant;
 
     final List<Widget> screens = isRestaurant
-        ? const [HomeScreen(), OrdersScreen(), InventoryScreen(), ProfileScreen()]
-        : const [SupplierIncomingOrdersScreen(), SupplierInventoryScreen(), ProfileScreen()];
+        ? [const HomeScreen(), const OrdersScreen(), const InventoryScreen(), ProfileScreen()]
+        : [const SupplierIncomingOrdersScreen(), const SupplierInventoryScreen(), ProfileScreen()];
 
     final List<NavigationDestination> destinations = isRestaurant
         ? const [

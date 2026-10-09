@@ -2,42 +2,177 @@ import 'package:flutter/material.dart';
 import '../../main.dart';
 import '../../config/session_manager.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/error_handler.dart';
+import '../../models/order.dart';
+import '../order_chat_screen.dart';
 
 class SupplierIncomingOrdersScreen extends StatefulWidget {
   const SupplierIncomingOrdersScreen({super.key});
 
   @override
-  State<SupplierIncomingOrdersScreen> createState() => _SupplierIncomingOrdersScreenState();
+  State<SupplierIncomingOrdersScreen> createState() =>
+      _SupplierIncomingOrdersScreenState();
 }
 
-class _SupplierIncomingOrdersScreenState extends State<SupplierIncomingOrdersScreen> {
+class _SupplierIncomingOrdersScreenState
+    extends State<SupplierIncomingOrdersScreen> {
   late Future<List<Map<String, dynamic>>> _ordersFuture;
+
+  String get _currentUserId =>
+      supabase.auth.currentUser?.id ?? SessionManager.supplierId;
 
   @override
   void initState() {
     super.initState();
-    _ordersFuture = _fetchSupplierOrders();
+    _ordersFuture = _fetchOrders();
   }
 
-  Future<List<Map<String, dynamic>>> _fetchSupplierOrders() async {
-    final response = await supabase
-        .from('orders')
-        .select('*, order_items(*), profiles!orders_restaurant_id_fkey(business_name, phone, address)')
-        .eq('supplier_id', SessionManager.supplierId)
-        .order('created_at', ascending: false);
+  void _refresh() {
+    setState(() {
+      _ordersFuture = _fetchOrders();
+    });
+  }
 
-    return List<Map<String, dynamic>>.from(response);
+  Future<List<Map<String, dynamic>>> _fetchOrders() async {
+    final userId = _currentUserId;
+
+    // 1. Obtener el ID alternativo de supplier_details si existiera
+    String? suppDetailId;
+    try {
+      final detail = await supabase
+          .from('supplier_details')
+          .select('id')
+          .eq('profile_id', userId)
+          .maybeSingle();
+      if (detail != null && detail['id'] != null) {
+        suppDetailId = detail['id'].toString();
+      }
+    } catch (_) {}
+
+    // 2. Traer órdenes filtradas por cualquiera de los dos IDs
+    final query = supabase.from('orders').select('''
+      *,
+      order_items (*)
+    ''');
+
+    final response = suppDetailId != null
+        ? await query
+            .or('supplier_id.eq.$userId,supplier_id.eq.$suppDetailId')
+            .order('created_at', ascending: false)
+        : await query
+            .eq('supplier_id', userId)
+            .order('created_at', ascending: false);
+
+    final orders = List<Map<String, dynamic>>.from(response);
+
+    // 3. Obtener nombres de los restaurantes desde profiles
+    final restaurantIds = orders
+        .map((o) => o['restaurant_id']?.toString())
+        .where((id) => id != null && id.isNotEmpty)
+        .toSet()
+        .toList();
+
+    if (restaurantIds.isNotEmpty) {
+      try {
+        final profilesRes = await supabase
+            .from('profiles')
+            .select('id, business_name, phone')
+            .filter('id', 'in', restaurantIds);
+
+        final profileMap = {
+          for (var p in (profilesRes as List<dynamic>))
+            p['id'].toString(): p as Map<String, dynamic>
+        };
+
+        for (var o in orders) {
+          final restId = o['restaurant_id']?.toString();
+          if (restId != null && profileMap.containsKey(restId)) {
+            o['restaurant_name'] = profileMap[restId]!['business_name'];
+            o['restaurant_phone'] = profileMap[restId]!['phone'];
+          } else {
+            o['restaurant_name'] = 'Restaurante';
+          }
+        }
+      } catch (_) {}
+    }
+
+    return orders;
   }
 
   Future<void> _updateOrderStatus(String orderId, String newStatus) async {
-    await supabase.from('orders').update({'status': newStatus}).eq('id', orderId);
-    setState(() {
-      _ordersFuture = _fetchSupplierOrders();
-    });
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Pedido actualizado a: $newStatus')),
-      );
+    try {
+      await supabase
+          .from('orders')
+          .update({'status': newStatus})
+          .eq('id', orderId);
+
+      _refresh();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Estado de orden actualizado a: $newStatus'),
+            backgroundColor: AppColors.tealMint,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        final msg = ErrorHandler.parse(e);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'entregado':
+        return Colors.green;
+      case 'enruta':
+      case 'en ruta':
+        return Colors.blue;
+      case 'confirmado':
+        return AppColors.tealMint;
+      case 'pendiente':
+        return Colors.orange;
+      case 'cancelado':
+        return Colors.red;
+      default:
+        return AppColors.primaryBlue;
+    }
+  }
+
+  String _formatStatus(String status) {
+    switch (status.toLowerCase()) {
+      case 'enruta':
+        return 'En Ruta';
+      case 'entregado':
+        return 'Entregado';
+      case 'confirmado':
+        return 'Confirmado';
+      case 'pendiente':
+        return 'Pendiente';
+      default:
+        return status;
+    }
+  }
+
+  OrderStatus _parseToOrderStatus(String status) {
+    switch (status.toLowerCase()) {
+      case 'enruta':
+      case 'en ruta':
+        return OrderStatus.enRuta;
+      case 'entregado':
+        return OrderStatus.entregado;
+      case 'confirmado':
+        return OrderStatus.confirmado;
+      case 'cancelado':
+        return OrderStatus.cancelado;
+      default:
+        return OrderStatus.pendiente;
     }
   }
 
@@ -49,7 +184,7 @@ class _SupplierIncomingOrdersScreenState extends State<SupplierIncomingOrdersScr
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: () => setState(() => _ordersFuture = _fetchSupplierOrders()),
+            onPressed: _refresh,
           ),
         ],
       ),
@@ -59,28 +194,59 @@ class _SupplierIncomingOrdersScreenState extends State<SupplierIncomingOrdersScr
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-          final orders = snapshot.data ?? [];
-          if (orders.isEmpty) {
-            return const Center(
-              child: Text('No tienes pedidos pendientes de entrega.'),
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Text(
+                  'Error al cargar despachos: ${snapshot.error}',
+                  style: const TextStyle(color: Colors.red),
+                ),
+              ),
             );
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
+          final orders = snapshot.data ?? [];
+          if (orders.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.assignment_outlined,
+                      size: 64, color: Colors.grey.shade400),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'No tienes pedidos pendientes de entrega.',
+                    style: TextStyle(
+                      color: AppColors.subtitleGrey,
+                      fontSize: 15,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          return ListView.separated(
+            padding: const EdgeInsets.all(14),
             itemCount: orders.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
             itemBuilder: (context, index) {
               final order = orders[index];
-              final restaurant = order['profiles'] as Map<String, dynamic>?;
-              final restaurantName = restaurant?['business_name'] ?? 'Restaurante';
-              final restaurantAddress = restaurant?['address'] ?? 'Sin dirección';
+              final orderId = order['id']?.toString() ?? '';
+              final code = order['code'] ?? 'ORD-000';
+              final restaurantName = order['restaurant_name'] ?? 'Restaurante';
+              final totalAmount =
+                  (order['total_amount'] as num?)?.toDouble() ?? 0.0;
+              final status = order['status'] ?? 'Pendiente';
               final items = (order['order_items'] as List<dynamic>?) ?? [];
-              final currentStatus = order['status'] ?? 'pendiente';
 
               return Card(
-                margin: const EdgeInsets.symmetric(vertical: 8),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 elevation: 2,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  side: BorderSide(color: Colors.grey.shade200),
+                ),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
@@ -89,59 +255,192 @@ class _SupplierIncomingOrdersScreenState extends State<SupplierIncomingOrdersScr
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(order['code'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                          Chip(
-                            label: Text(currentStatus.toString().toUpperCase(), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                            backgroundColor: currentStatus == 'entregado' ? AppColors.tealMint.withOpacity(0.2) : Colors.orange.shade100,
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                code,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                  color: AppColors.navyDark,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Cliente: $restaurantName',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: AppColors.subtitleGrey,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: _getStatusColor(status).withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              _formatStatus(status),
+                              style: TextStyle(
+                                color: _getStatusColor(status),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 6),
-                      Text('Cliente: $restaurantName', style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.navyDark)),
-                      Text('Destino: $restaurantAddress', style: const TextStyle(fontSize: 12, color: AppColors.subtitleGrey)),
                       const Divider(height: 20),
-                      ...items.map((i) => Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('${i['quantity']}x ${i['product_name']}'),
-                            Text('\$${(i['total'] as num?)?.toStringAsFixed(2) ?? "0.00"}'),
-                          ],
+                      if (items.isNotEmpty) ...[
+                        const Text(
+                          'Insumos solicitados:',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.subtitleGrey,
+                          ),
                         ),
-                      )),
-                      const Divider(height: 20),
+                        const SizedBox(height: 6),
+                        ...items.map((item) {
+                          final pName = item['product_name'] ?? 'Producto';
+                          final qty = item['quantity'] ?? 1;
+                          final price =
+                              (item['unit_price'] as num?)?.toDouble() ?? 0.0;
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('• $qty x $pName',
+                                    style: const TextStyle(fontSize: 13)),
+                                Text('\$${(qty * price).toStringAsFixed(2)}',
+                                    style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500)),
+                              ],
+                            ),
+                          );
+                        }),
+                        const Divider(height: 20),
+                      ],
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text('Total a cobrar:', style: TextStyle(fontWeight: FontWeight.bold)),
-                          Text(
-                            '\$${(order['total_amount'] as num?)?.toStringAsFixed(2) ?? "0.00"}',
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primaryBlue),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Total orden:',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: AppColors.subtitleGrey)),
+                              Text(
+                                '\$${totalAmount.toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.navyDark,
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      // Acciones de despacho del repartidor/distribuidor
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: currentStatus == 'enRuta'
-                                  ? null
-                                  : () => _updateOrderStatus(order['id'], 'enRuta'),
-                              child: const Text('En Ruta', style: TextStyle(fontSize: 12)),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(backgroundColor: AppColors.tealMint),
-                              onPressed: currentStatus == 'entregado'
-                                  ? null
-                                  : () => _updateOrderStatus(order['id'], 'entregado'),
-                              child: const Text('Entregado', style: TextStyle(fontSize: 12, color: Colors.white)),
-                            ),
+                          Row(
+                            children: [
+                              OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: AppColors.primaryBlue,
+                                  side: const BorderSide(
+                                      color: AppColors.primaryBlue),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                icon: const Icon(Icons.chat_bubble_outline,
+                                    size: 16),
+                                label: const Text('Chat'),
+                                onPressed: () {
+                                  final orderObj = OrderModel(
+                                    id: orderId,
+                                    code: code,
+                                    restaurantName: restaurantName,
+                                    supplierName: 'Mi Distribuidora',
+                                    supplierPhone: order['restaurant_phone'] ?? '',
+                                    items: items.map((i) => OrderItem(
+                                      productName: i['product_name']?.toString() ?? 'Producto',
+                                      quantity: (i['quantity'] as num?)?.toInt() ?? 1,
+                                      unitPrice: (i['unit_price'] as num?)?.toDouble() ?? 0.0,
+                                    )).toList(),
+                                    totalAmount: totalAmount,
+                                    status: _parseToOrderStatus(status),
+                                    deliveryDate: order['delivery_date'] != null
+                                        ? DateTime.tryParse(order['delivery_date'].toString()) ?? DateTime.now()
+                                        : DateTime.now(),
+                                    isFinanced: order['is_financed'] ?? false,
+                                    installmentsCount: order['installments_count'] ?? 1,
+                                  );
+
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => OrderChatScreen(
+                                        order: orderObj,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              PopupMenuButton<String>(
+                                initialValue: status,
+                                onSelected: (newVal) =>
+                                    _updateOrderStatus(orderId, newVal),
+                                itemBuilder: (context) => const [
+                                  PopupMenuItem(
+                                    value: 'pendiente',
+                                    child: Text('Marcar Pendiente'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'confirmado',
+                                    child: Text('Marcar Confirmado'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'enRuta',
+                                    child: Text('Marcar En Ruta'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'entregado',
+                                    child: Text('Marcar Entregado'),
+                                  ),
+                                ],
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primaryBlue,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        'Estado',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                      Icon(Icons.arrow_drop_down,
+                                          color: Colors.white, size: 18),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),

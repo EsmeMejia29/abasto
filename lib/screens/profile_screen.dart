@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import '../main.dart';
 import '../config/session_manager.dart';
 import '../theme/app_theme.dart';
-import 'welcome_screen.dart';
 import '../utils/error_handler.dart';
+import 'welcome_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -19,9 +19,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _businessNameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
+
+  // Campos específicos de Restaurante
   final _decisionMakerCtrl = TextEditingController();
   final _budgetCtrl = TextEditingController();
+  final _restaurantTypeCtrl = TextEditingController();
+  final _orderFrequencyCtrl = TextEditingController();
 
+  // Campos específicos de Proveedor
   final _categoryCtrl = TextEditingController();
   final _coverageCtrl = TextEditingController();
   final _deliveryDaysCtrl = TextEditingController();
@@ -34,11 +39,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _loadProfileData();
   }
 
+  @override
+  void dispose() {
+    _businessNameCtrl.dispose();
+    _phoneCtrl.dispose();
+    _addressCtrl.dispose();
+    _decisionMakerCtrl.dispose();
+    _budgetCtrl.dispose();
+    _restaurantTypeCtrl.dispose();
+    _orderFrequencyCtrl.dispose();
+    _categoryCtrl.dispose();
+    _coverageCtrl.dispose();
+    _deliveryDaysCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadProfileData() async {
     setState(() => _isLoading = true);
     final userId = supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
 
     try {
+      // 1. Cargar perfil base
       final profile = await supabase
           .from('profiles')
           .select('*')
@@ -51,15 +72,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _addressCtrl.text = profile['address'] ?? '';
       }
 
+      // 2. Cargar detalles según el rol
       if (_isRestaurant) {
         final restData = await supabase
             .from('restaurant_details')
             .select('*')
             .eq('profile_id', userId)
             .maybeSingle();
+
         if (restData != null) {
           _decisionMakerCtrl.text = restData['contact_decision_maker'] ?? '';
           _budgetCtrl.text = (restData['monthly_budget'] as num?)?.toString() ?? '0.00';
+          _restaurantTypeCtrl.text = restData['restaurant_type'] ?? '';
+          _orderFrequencyCtrl.text = restData['order_frequency'] ?? '';
         }
       } else {
         final suppData = await supabase
@@ -67,6 +92,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             .select('*')
             .eq('profile_id', userId)
             .maybeSingle();
+
         if (suppData != null) {
           _categoryCtrl.text = suppData['category'] ?? '';
           _coverageCtrl.text = suppData['delivery_coverage'] ?? '';
@@ -86,7 +112,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       // 1. Guardar en profiles
       await supabase.from('profiles').upsert({
         'id': userId,
-        'email': supabase.auth.currentUser?.email ?? 'correo@demo.sv',
+        'email': supabase.auth.currentUser?.email ?? 'correo@abasto.sv',
         'business_name': _businessNameCtrl.text.trim(),
         'phone': _phoneCtrl.text.trim(),
         'address': _addressCtrl.text.trim(),
@@ -94,12 +120,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
         'updated_at': DateTime.now().toIso8601String(),
       });
 
-      // 2. Guardar en detalles
+      // 2. Guardar en detalles correspondientes
       if (_isRestaurant) {
         await supabase.from('restaurant_details').upsert({
           'profile_id': userId,
           'contact_decision_maker': _decisionMakerCtrl.text.trim(),
           'monthly_budget': double.tryParse(_budgetCtrl.text) ?? 0.00,
+          'restaurant_type': _restaurantTypeCtrl.text.trim(),
+          'order_frequency': _orderFrequencyCtrl.text.trim(),
         });
       } else {
         await supabase.from('supplier_details').upsert({
@@ -115,6 +143,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SnackBar(
             content: Text('¡Cambios guardados con éxito!'),
             backgroundColor: AppColors.tealMint,
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
@@ -141,7 +170,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         title: const Text('Cerrar Sesión'),
         content: const Text('¿Estás seguro de que deseas salir de tu cuenta?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
             onPressed: () => Navigator.pop(ctx, true),
@@ -183,13 +215,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Cabecera de Identidad
+                  // Tarjeta superior de presentación
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
                       gradient: AppColors.logoGradient,
                       borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.primaryBlue.withOpacity(0.25),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
                     child: Row(
                       children: [
@@ -208,12 +247,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                _businessNameCtrl.text.isEmpty ? 'Mi Negocio' : _businessNameCtrl.text,
-                                style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                                _businessNameCtrl.text.isEmpty
+                                    ? (_isRestaurant ? 'Mi Restaurante' : 'Mi Distribuidora')
+                                    : _businessNameCtrl.text,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                _isRestaurant ? 'Cuenta Restaurante / Comprador' : 'Cuenta Distribuidor / Mayorista',
+                                _isRestaurant
+                                    ? 'Cuenta Restaurante / Comprador'
+                                    : 'Cuenta Distribuidor / Mayorista',
                                 style: const TextStyle(color: Colors.white70, fontSize: 12),
                               ),
                             ],
@@ -224,18 +271,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
 
                   const SizedBox(height: 24),
-                  const Text('Información General', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.navyDark)),
+                  const Text(
+                    'Información General',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.navyDark,
+                    ),
+                  ),
                   const SizedBox(height: 12),
 
                   TextField(
                     controller: _businessNameCtrl,
-                    decoration: const InputDecoration(labelText: 'Nombre Comercial', prefixIcon: Icon(Icons.store), border: OutlineInputBorder()),
+                    decoration: const InputDecoration(
+                      labelText: 'Nombre Comercial',
+                      prefixIcon: Icon(Icons.store),
+                      border: OutlineInputBorder(),
+                    ),
                   ),
                   const SizedBox(height: 14),
 
                   TextField(
                     controller: _phoneCtrl,
-                    decoration: const InputDecoration(labelText: 'Teléfono de Contacto (WhatsApp)', prefixIcon: Icon(Icons.phone), border: OutlineInputBorder()),
+                    decoration: const InputDecoration(
+                      labelText: 'Teléfono de Contacto (WhatsApp)',
+                      prefixIcon: Icon(Icons.phone),
+                      border: OutlineInputBorder(),
+                    ),
                   ),
                   const SizedBox(height: 14),
 
@@ -249,35 +311,93 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 24),
 
+                  // Campos específicos según el rol
                   if (_isRestaurant) ...[
-                    const Text('Operación de Abastecimiento', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.navyDark)),
+                    const Text(
+                      'Operación de Abastecimiento',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.navyDark,
+                      ),
+                    ),
                     const SizedBox(height: 12),
                     TextField(
+                      controller: _restaurantTypeCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Giro / Especialidad Gastronómica',
+                        hintText: 'Ej. Pupusería, Pizzería, Cafetería',
+                        prefixIcon: Icon(Icons.restaurant_menu),
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: _orderFrequencyCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Frecuencia de Abastecimiento',
+                        hintText: 'Ej. Diario, 2 a 3 veces por semana',
+                        prefixIcon: Icon(Icons.replay),
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
                       controller: _decisionMakerCtrl,
-                      decoration: const InputDecoration(labelText: 'Encargado de Compras / Decisor', prefixIcon: Icon(Icons.person), border: OutlineInputBorder()),
+                      decoration: const InputDecoration(
+                        labelText: 'Encargado de Compras / Decisor',
+                        prefixIcon: Icon(Icons.person),
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                     const SizedBox(height: 14),
                     TextField(
                       controller: _budgetCtrl,
                       keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Presupuesto Mensual Estimado (\$ USD)', prefixIcon: Icon(Icons.attach_money), border: OutlineInputBorder()),
+                      decoration: const InputDecoration(
+                        labelText: 'Presupuesto Mensual Estimado (\$ USD)',
+                        prefixIcon: Icon(Icons.attach_money),
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                   ] else ...[
-                    const Text('Logística y Distribución', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.navyDark)),
+                    const Text(
+                      'Logística y Distribución',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.navyDark,
+                      ),
+                    ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: _categoryCtrl,
-                      decoration: const InputDecoration(labelText: 'Rubro / Categoría Principal', prefixIcon: Icon(Icons.category), border: OutlineInputBorder()),
+                      decoration: const InputDecoration(
+                        labelText: 'Rubro / Categoría Principal',
+                        hintText: 'Ej. Verduras y Frutas, Carnes, Lácteos',
+                        prefixIcon: Icon(Icons.category),
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                     const SizedBox(height: 14),
                     TextField(
                       controller: _coverageCtrl,
-                      decoration: const InputDecoration(labelText: 'Zonas de Cobertura', prefixIcon: Icon(Icons.map), border: OutlineInputBorder()),
+                      decoration: const InputDecoration(
+                        labelText: 'Zonas de Cobertura',
+                        hintText: 'Ej. Santa Tecla, Antiguo Cuscatlán, San Salvador',
+                        prefixIcon: Icon(Icons.map),
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                     const SizedBox(height: 14),
                     TextField(
                       controller: _deliveryDaysCtrl,
-                      decoration: const InputDecoration(labelText: 'Días y Horarios de Entrega', prefixIcon: Icon(Icons.schedule), border: OutlineInputBorder()),
+                      decoration: const InputDecoration(
+                        labelText: 'Días y Horarios de Entrega',
+                        hintText: 'Ej. Lunes, Miércoles y Viernes',
+                        prefixIcon: Icon(Icons.schedule),
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                   ],
 
@@ -289,14 +409,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryBlue),
                       onPressed: _isSaving ? null : _saveProfile,
-                      icon: const Icon(Icons.save, color: Colors.white),
-                      label: Text(_isSaving ? 'Guardando...' : 'Guardar Cambios', style: const TextStyle(color: Colors.white)),
+                      icon: _isSaving
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.save, color: Colors.white),
+                      label: Text(
+                        _isSaving ? 'Guardando...' : 'Guardar Cambios',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ),
 
                   const SizedBox(height: 14),
 
-                  // Botón explícito de Cerrar Sesión
                   SizedBox(
                     width: double.infinity,
                     height: 46,

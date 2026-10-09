@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../main.dart';
 import '../models/order.dart';
 import '../theme/app_theme.dart';
+import 'order_chat_screen.dart';
 
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
@@ -20,7 +21,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
   }
 
   Future<List<OrderModel>> _fetchOrders() async {
-    // 1. Obtener órdenes con sus ítems (sin join ambiguo a profiles)
+    // 1. Obtener órdenes con sus items
     final ordersResponse = await supabase
         .from('orders')
         .select('*, order_items(*)')
@@ -29,23 +30,30 @@ class _OrdersScreenState extends State<OrdersScreen> {
     final ordersData = ordersResponse as List<dynamic>;
     if (ordersData.isEmpty) return [];
 
-    // 2. Obtener los nombres de perfiles de proveedores involucrados
-    final supplierIds = ordersData.map((o) => o['supplier_id'].toString()).toSet().toList();
+    // 2. Obtener nombres y teléfonos de perfiles
+    final supplierIds =
+        ordersData.map((o) => o['supplier_id'].toString()).toSet().toList();
     final profilesResponse = await supabase
         .from('profiles')
-        .select('id, business_name')
+        .select('id, business_name, phone')
         .filter('id', 'in', supplierIds);
 
-    final supplierMap = <String, String>{};
+    final supplierNameMap = <String, String>{};
+    final supplierPhoneMap = <String, String>{};
+
     for (var prof in profilesResponse as List<dynamic>) {
-      supplierMap[prof['id'].toString()] = prof['business_name'] ?? 'Proveedor';
+      final id = prof['id'].toString();
+      supplierNameMap[id] = prof['business_name'] ?? 'Proveedor';
+      supplierPhoneMap[id] = prof['phone'] ?? '+503 7000-0000';
     }
 
-    // 3. Mapear cada orden con su respectivo nombre de proveedor
     return ordersData.map((order) {
-      final sId = order['supplier_id']?.toString();
-      final name = supplierMap[sId] ?? 'Proveedor de Alimentos';
-      return OrderModel.fromMap(order as Map<String, dynamic>, supplierNameOverride: name);
+      final sId = order['supplier_id']?.toString() ?? '';
+      return OrderModel.fromMap(
+        order as Map<String, dynamic>,
+        supplierNameOverride: supplierNameMap[sId],
+        supplierPhoneOverride: supplierPhoneMap[sId],
+      );
     }).toList();
   }
 
@@ -73,10 +81,65 @@ class _OrdersScreenState extends State<OrdersScreen> {
       case OrderStatus.enRuta:
         return 'En Ruta de Reparto';
       case OrderStatus.entregado:
-        return 'Entregado en Local';
+        return 'Entregado';
       case OrderStatus.cancelado:
         return 'Cancelado';
     }
+  }
+
+  void _showContactInfoDialog(OrderModel order) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(order.supplierName),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Datos directos del distribuidor:',
+              style: TextStyle(color: AppColors.subtitleGrey, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Icon(Icons.phone, color: AppColors.primaryBlue, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  order.supplierPhone,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Asociado a tu pedido: ${order.code}',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cerrar'),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryBlue),
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => OrderChatScreen(order: order),
+                ),
+              );
+            },
+            icon: const Icon(Icons.chat, size: 16, color: Colors.white),
+            label: const Text('Abrir Chat', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -105,11 +168,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(20.0),
-                child: Text(
-                  'Error al cargar pedidos: ${snapshot.error}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.red),
-                ),
+                child: Text('Error al cargar pedidos: ${snapshot.error}',
+                    style: const TextStyle(color: Colors.red)),
               ),
             );
           }
@@ -121,7 +181,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 children: [
                   Icon(Icons.inventory_2_outlined, size: 64, color: Colors.grey.shade400),
                   const SizedBox(height: 12),
-                  const Text('No hay pedidos activos en curso.', style: TextStyle(color: AppColors.subtitleGrey)),
+                  const Text('No hay pedidos activos en curso.',
+                      style: TextStyle(color: AppColors.subtitleGrey)),
                 ],
               ),
             );
@@ -146,7 +207,10 @@ class _OrdersScreenState extends State<OrdersScreen> {
                         children: [
                           Text(
                             order.code,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppColors.navyDark),
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: AppColors.navyDark),
                           ),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -172,7 +236,10 @@ class _OrdersScreenState extends State<OrdersScreen> {
                           const SizedBox(width: 6),
                           Text(
                             order.supplierName,
-                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.navyDark),
+                            style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.navyDark),
                           ),
                         ],
                       ),
@@ -183,8 +250,10 @@ class _OrdersScreenState extends State<OrdersScreen> {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text('${item.quantity}x ${item.productName}', style: const TextStyle(fontSize: 13)),
-                              Text('\$${item.total.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w500)),
+                              Text('${item.quantity}x ${item.productName}',
+                                  style: const TextStyle(fontSize: 13)),
+                              Text('\$${item.total.toStringAsFixed(2)}',
+                                  style: const TextStyle(fontWeight: FontWeight.w500)),
                             ],
                           ),
                         ),
@@ -195,11 +264,61 @@ class _OrdersScreenState extends State<OrdersScreen> {
                         children: [
                           const Text(
                             'Pago contra entrega',
-                            style: TextStyle(color: AppColors.subtitleGrey, fontSize: 12, fontWeight: FontWeight.w500),
+                            style: TextStyle(
+                                color: AppColors.subtitleGrey,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500),
                           ),
                           Text(
                             'Total: \$${order.totalAmount.toStringAsFixed(2)}',
-                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.primaryBlue),
+                            style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.primaryBlue),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+
+                      // Botones de comunicación directa
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: AppColors.primaryBlue),
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              onPressed: () => _showContactInfoDialog(order),
+                              icon: const Icon(Icons.phone_outlined, size: 16),
+                              label: const Text('Llamar / Info', style: TextStyle(fontSize: 12)),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.primaryBlue,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => OrderChatScreen(order: order),
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.chat_outlined, size: 16),
+                              label: const Text('Chat del Pedido', style: TextStyle(fontSize: 12)),
+                            ),
                           ),
                         ],
                       ),
