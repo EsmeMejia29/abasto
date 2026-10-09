@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../main.dart';
 import '../theme/app_theme.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class CrmScreen extends StatefulWidget {
   const CrmScreen({super.key});
@@ -10,16 +11,53 @@ class CrmScreen extends StatefulWidget {
 }
 
 class _CrmScreenState extends State<CrmScreen> {
+  RealtimeChannel? _crmSubscription;
   bool _isLoading = true;
   double _totalSpent = 0.0;
   int _totalOrders = 0;
   List<MapEntry<String, double>> _topSuppliers = [];
   List<MapEntry<String, double>> _topSupplies = [];
 
-  @override
+ @override
   void initState() {
     super.initState();
     _loadCrmData();
+    _setupRealtime();
+  }
+
+  void _setupRealtime() {
+    // Escucha cambios tanto en orders como en order_items
+    _crmSubscription = supabase
+        .channel('public:restaurant_crm_channel')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'orders',
+          callback: (payload) {
+            debugPrint('Cambio en orders detectado por CRM: ${payload.eventType}');
+            if (mounted) {
+              _loadCrmData();
+            }
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'order_items',
+          callback: (payload) {
+            debugPrint('Cambio en order_items detectado por CRM: ${payload.eventType}');
+            if (mounted) {
+              _loadCrmData();
+            }
+          },
+        )
+        .subscribe();
+  }
+
+  @override
+  void dispose() {
+    _crmSubscription?.unsubscribe();
+    super.dispose();
   }
 
   Future<void> _loadCrmData() async {

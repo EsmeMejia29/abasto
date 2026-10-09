@@ -52,28 +52,67 @@ class _BusinessInfoSheetState extends State<BusinessInfoSheet> {
     try {
       final bid = widget.businessId.toString();
 
-      // 1. Perfil
+      // 1. Perfil del negocio
       final p = await supabase
           .from('profiles')
           .select('*')
           .eq('id', bid)
           .maybeSingle();
 
-      // 2. Traer reseñas dirigidas a este negocio
+      // 2. Traer reseñas potenciales asociadas
       final r = await supabase
           .from('reviews')
           .select('*')
-          .or('target_id.eq.$bid,restaurant_id.eq.$bid,supplier_id.eq.$bid')
+          .or('target_id.eq.$bid,supplier_id.eq.$bid,restaurant_id.eq.$bid')
           .order('created_at', ascending: false);
 
-      final list = (r as List<dynamic>)
+      final rawList = (r as List<dynamic>)
           .map((e) => e as Map<String, dynamic>)
           .toList();
+
+      // 3. Filtrar estrictamente solo las reseñas RECIBIDAS por este negocio
+      final filteredList = rawList.where((rev) {
+        final targetRole = (rev['target_role'] ?? '').toString().toLowerCase().trim();
+        final targetId = (rev['target_id'] ?? '').toString().trim();
+        final authorId = (rev['author_id'] ?? '').toString().trim();
+        final authorName = (rev['author_name'] ?? '').toString().toLowerCase().trim();
+
+        // El autor NUNCA puede ser el mismo negocio que estamos consultando
+        if (authorId.isNotEmpty && authorId == bid) {
+          return false;
+        }
+
+        if (widget.role == 'supplier') {
+          // Si estamos viendo el perfil de un DISTRIBUIDOR:
+          // Solo mostrar reseñas dirigidas a él (hechas por restaurantes)
+          if (targetRole.isNotEmpty && targetRole != 'supplier') {
+            return false;
+          }
+          if (targetId.isNotEmpty && targetId != bid) {
+            return false;
+          }
+          // Descartar reseñas donde el autor tenga nombre de distribuidor
+          if (authorName.contains('distribuidor')) {
+            return false;
+          }
+        } else {
+          // Si estamos viendo el perfil de un RESTAURANTE:
+          // Solo mostrar reseñas dirigidas a él (hechas por distribuidores)
+          if (targetRole.isNotEmpty && targetRole != 'restaurant') {
+            return false;
+          }
+          if (targetId.isNotEmpty && targetId != bid) {
+            return false;
+          }
+        }
+
+        return true;
+      }).toList();
 
       if (mounted) {
         setState(() {
           _profile = p;
-          _reviews = list;
+          _reviews = filteredList;
           _isLoading = false;
         });
       }
@@ -100,8 +139,19 @@ class _BusinessInfoSheetState extends State<BusinessInfoSheet> {
     final nrcNit = p['nrc_nit'] ?? 'En trámite de registro';
     final hours = p['business_hours'] ?? 'Lunes a Sábado: 7:00 AM - 5:00 PM';
     final avatarUrl = p['avatar_url'];
-    final rating = (p['rating'] as num?)?.toDouble() ?? 5.0;
-    final reviewsCount = (p['reviews_count'] as num?)?.toInt() ?? _reviews.length;
+
+    // Calificación dinámica según las reseñas realmente recibidas
+    double rating = 5.0;
+    if (_reviews.isNotEmpty) {
+      final sum = _reviews.fold<double>(
+        0.0,
+        (acc, item) => acc + ((item['rating'] as num?)?.toDouble() ?? 5.0),
+      );
+      rating = sum / _reviews.length;
+    } else if (p['rating'] != null) {
+      rating = (p['rating'] as num).toDouble();
+    }
+    final reviewsCount = _reviews.length;
 
     return DraggableScrollableSheet(
       initialChildSize: 0.75,
@@ -171,7 +221,7 @@ class _BusinessInfoSheetState extends State<BusinessInfoSheet> {
                           const Icon(Icons.star, color: Colors.amber, size: 16),
                           const SizedBox(width: 4),
                           Text(
-                            '$rating ($reviewsCount reseñas)',
+                            '${rating.toStringAsFixed(1)} ($reviewsCount reseñas)',
                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                           ),
                         ],

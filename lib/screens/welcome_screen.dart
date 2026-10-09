@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../config/session_manager.dart';
-import 'auth_screen.dart'; // <-- IMPORTA AUTH SCREEN
+import 'auth_screen.dart';
 
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
@@ -38,7 +38,11 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
               const Text(
                 'Plataforma B2B de Abastecimiento',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.navyDark),
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.navyDark,
+                ),
               ),
               const SizedBox(height: 10),
               const Text(
@@ -49,16 +53,25 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
               const SizedBox(height: 20),
 
               SegmentedButton<UserRole>(
-                segments: const [
+                showSelectedIcon: false, // Evita que Flutter duplique o fuerce el checkmark genérico
+                segments: [
                   ButtonSegment<UserRole>(
                     value: UserRole.restaurant,
-                    label: Text('Restaurante'),
-                    icon: Icon(Icons.check),
+                    label: const Text('Restaurante'),
+                    icon: Icon(
+                      _selectedRole == UserRole.restaurant
+                          ? Icons.check
+                          : Icons.restaurant,
+                    ),
                   ),
                   ButtonSegment<UserRole>(
                     value: UserRole.supplier,
-                    label: Text('Distribuidor'),
-                    icon: Icon(Icons.local_shipping),
+                    label: const Text('Distribuidor'),
+                    icon: Icon(
+                      _selectedRole == UserRole.supplier
+                          ? Icons.check
+                          : Icons.local_shipping_outlined,
+                    ),
                   ),
                 ],
                 selected: {_selectedRole},
@@ -68,13 +81,13 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   });
                 },
                 style: SegmentedButton.styleFrom(
-                  selectedBackgroundColor: const Color(0xFF26A69A), // Verde menta / teal característico
-                  selectedForegroundColor: Colors.white,            // Texto e icono en blanco
+                  selectedBackgroundColor: const Color(0xFF26A69A), // Verde menta / teal
+                  selectedForegroundColor: Colors.white,            // Texto e ícono en blanco
                   backgroundColor: Colors.white,                    // Fondo del no seleccionado
                   foregroundColor: const Color(0xFF334155),         // Texto del no seleccionado
-                  side: const BorderSide(color: Color(0xFFCBD5E1)), // Borde sutil gris
+                  side: const BorderSide(color: Color(0xFFCBD5E1)), // Borde sutil
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(24),        // Bordes redondeados elegantes
+                    borderRadius: BorderRadius.circular(24),
                   ),
                 ),
               ),
@@ -85,9 +98,13 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryBlue),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primaryBlue,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
                   onPressed: () {
-                    // Navega a la pantalla de Login / Registro pasando el rol elegido
                     Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -100,7 +117,11 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                     children: [
                       Text(
                         'Continuar',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
                       ),
                       SizedBox(width: 8),
                       Icon(Icons.arrow_forward, size: 20, color: Colors.white),

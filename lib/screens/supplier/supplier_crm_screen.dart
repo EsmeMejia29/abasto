@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../main.dart';
 import '../../theme/app_theme.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SupplierCrmScreen extends StatefulWidget {
   const SupplierCrmScreen({super.key});
@@ -10,6 +11,8 @@ class SupplierCrmScreen extends StatefulWidget {
 }
 
 class _SupplierCrmScreenState extends State<SupplierCrmScreen> {
+  RealtimeChannel? _crmSubscription;
+
   bool _isLoading = true;
   double _totalRevenue = 0.0;
   int _totalOrders = 0;
@@ -20,6 +23,29 @@ class _SupplierCrmScreenState extends State<SupplierCrmScreen> {
   void initState() {
     super.initState();
     _loadAnalytics();
+    _setupRealtime();
+  }
+
+  void _setupRealtime() {
+    _crmSubscription = supabase
+        .channel('public:crm_realtime_channel')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'orders',
+          callback: (payload) {
+            if (mounted) {
+              setState(() {});
+            }
+          },
+        )
+        .subscribe();
+  }
+
+  @override
+  void dispose() {
+    _crmSubscription?.unsubscribe();
+    super.dispose();
   }
 
   Future<void> _loadAnalytics() async {

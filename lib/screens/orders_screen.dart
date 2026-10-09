@@ -5,6 +5,7 @@ import '../theme/app_theme.dart';
 import '../config/session_manager.dart';
 import 'order_chat_screen.dart';
 import '../widgets/review_dialog.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
@@ -14,6 +15,8 @@ class OrdersScreen extends StatefulWidget {
 }
 
 class _OrdersScreenState extends State<OrdersScreen> {
+  RealtimeChannel? _ordersSubscription;
+
   late Future<List<Map<String, dynamic>>> _ordersFuture;
 
   String get _currentUserId =>
@@ -23,6 +26,30 @@ class _OrdersScreenState extends State<OrdersScreen> {
   void initState() {
     super.initState();
     _ordersFuture = _fetchOrders();
+    _setupRealtime();
+  }
+
+  void _setupRealtime() {
+    _ordersSubscription = supabase
+        .channel('public:restaurant_orders_channel')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'orders',
+          callback: (payload) {
+            debugPrint('Actualización en orders recibida: ${payload.eventType}');
+            if (mounted) {
+              _refresh();
+            }
+          },
+        )
+        .subscribe();
+  }
+
+  @override
+  void dispose() {
+    _ordersSubscription?.unsubscribe();
+    super.dispose();
   }
 
   void _refresh() {

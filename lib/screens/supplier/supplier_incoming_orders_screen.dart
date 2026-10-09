@@ -7,6 +7,7 @@ import '../../models/order.dart';
 import '../order_chat_screen.dart';
 import '../../widgets/review_dialog.dart';
 import '../../widgets/business_info_sheet.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SupplierIncomingOrdersScreen extends StatefulWidget {
   const SupplierIncomingOrdersScreen({super.key});
@@ -19,6 +20,7 @@ class SupplierIncomingOrdersScreen extends StatefulWidget {
 class _SupplierIncomingOrdersScreenState
     extends State<SupplierIncomingOrdersScreen> {
   late Future<List<Map<String, dynamic>>> _ordersFuture;
+  RealtimeChannel? _ordersSubscription;
 
   String get _currentUserId =>
       supabase.auth.currentUser?.id ?? SessionManager.supplierId;
@@ -27,6 +29,29 @@ class _SupplierIncomingOrdersScreenState
   void initState() {
     super.initState();
     _ordersFuture = _fetchOrders();
+    _setupRealtime();
+  }
+
+  void _setupRealtime() {
+    _ordersSubscription = supabase
+        .channel('public:supplier_incoming_orders_channel')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'orders',
+          callback: (payload) {
+            if (mounted) {
+              setState(() {});
+            }
+          },
+        )
+        .subscribe();
+  }
+
+  @override
+  void dispose() {
+    _ordersSubscription?.unsubscribe();
+    super.dispose();
   }
 
   void _refresh() {
