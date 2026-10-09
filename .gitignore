@@ -49,3 +49,5 @@ app.*.map.json
 # Configuración local sensible
 lib/config/supabase_config.dart
 .env
+.vercel
+.env*

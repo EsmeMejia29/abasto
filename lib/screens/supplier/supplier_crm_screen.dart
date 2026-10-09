@@ -1,41 +1,37 @@
 import 'package:flutter/material.dart';
-import '../main.dart';
-import '../theme/app_theme.dart';
+import '../../main.dart';
+import '../../theme/app_theme.dart';
 
-class CrmScreen extends StatefulWidget {
-  const CrmScreen({super.key});
+class SupplierCrmScreen extends StatefulWidget {
+  const SupplierCrmScreen({super.key});
 
   @override
-  State<CrmScreen> createState() => _CrmScreenState();
+  State<SupplierCrmScreen> createState() => _SupplierCrmScreenState();
 }
 
-class _CrmScreenState extends State<CrmScreen> {
+class _SupplierCrmScreenState extends State<SupplierCrmScreen> {
   bool _isLoading = true;
-  double _totalSpent = 0.0;
+  double _totalRevenue = 0.0;
   int _totalOrders = 0;
-  List<MapEntry<String, double>> _topSuppliers = [];
-  List<MapEntry<String, double>> _topSupplies = [];
+  List<MapEntry<String, double>> _topProducts = [];
+  List<MapEntry<String, List<num>>> _topClientsByOrders = [];
 
   @override
   void initState() {
     super.initState();
-    _loadCrmData();
+    _loadAnalytics();
   }
 
-  Future<void> _loadCrmData() async {
+  Future<void> _loadAnalytics() async {
     setState(() => _isLoading = true);
     try {
       final currentUid = supabase.auth.currentUser?.id;
 
-      // 1. Consultar todos los perfiles de la BD para tener el mapa id -> business_name
-      final Map<String, String> supplierNames = {};
+      // 1. Obtener nombres de clientes/restaurantes desde profiles
+      final Map<String, String> restaurantNames = {};
       try {
-        final profilesRes = await supabase
-            .from('profiles')
-            .select('*');
-
+        final profilesRes = await supabase.from('profiles').select('*');
         for (var p in profilesRes) {
-          // Evalúa las columnas habituales de nombre comercial o personal
           final dynamic rawName = p['business_name'] ??
               p['company_name'] ??
               p['store_name'] ??
@@ -44,44 +40,44 @@ class _CrmScreenState extends State<CrmScreen> {
               p['full_name'];
 
           if (rawName != null && rawName.toString().trim().isNotEmpty) {
-            supplierNames[p['id'].toString()] = rawName.toString().trim();
+            restaurantNames[p['id'].toString()] = rawName.toString().trim();
           }
         }
       } catch (e) {
-        debugPrint("Error leyendo profiles: $e");
+        debugPrint("Error mapeando perfiles: $e");
       }
 
-      // 2. Traer las órdenes correspondientes al restaurante actual
+      // 2. Consultar las órdenes asignadas a este distribuidor
       var query = supabase.from('orders').select('*');
       List<Map<String, dynamic>> orders = [];
 
       try {
         final res = (currentUid != null)
-            ? await query.eq('restaurant_id', currentUid).order('created_at', ascending: false)
+            ? await query.eq('supplier_id', currentUid).order('created_at', ascending: false)
             : await query.order('created_at', ascending: false);
         orders = List<Map<String, dynamic>>.from(res);
       } catch (_) {
-        final resFallback = await supabase.from('orders').select('*').order('created_at', ascending: false);
-        orders = List<Map<String, dynamic>>.from(resFallback);
+        final resAll = await supabase.from('orders').select('*').order('created_at', ascending: false);
+        orders = List<Map<String, dynamic>>.from(resAll);
       }
 
-      // Si se probaron órdenes con otro restaurant_id de prueba, tomar las órdenes asociadas al grupo principal
+      // Si por sesiones de prueba el UID no coincide directamente, agrupar por el supplier_id principal
       if (orders.isEmpty) {
         final resAll = await supabase.from('orders').select('*').order('created_at', ascending: false);
         final allOrders = List<Map<String, dynamic>>.from(resAll);
-        final Map<String, List<Map<String, dynamic>>> grouped = {};
+        final Map<String, List<Map<String, dynamic>>> bySupplier = {};
         for (var o in allOrders) {
-          final rId = o['restaurant_id']?.toString() ?? '';
-          grouped.putIfAbsent(rId, () => []).add(o);
+          final sId = o['supplier_id']?.toString() ?? '';
+          bySupplier.putIfAbsent(sId, () => []).add(o);
         }
-        if (grouped.isNotEmpty) {
-          orders = grouped.values.reduce((a, b) => a.length > b.length ? a : b);
+        if (bySupplier.isNotEmpty) {
+          orders = bySupplier.values.reduce((a, b) => a.length > b.length ? a : b);
         }
       }
 
       final myOrderIds = orders.map((o) => o['id'].toString()).toSet();
 
-      // 3. Traer los ítems de estas órdenes directamente desde order_items enlazado con products
+      // 3. Obtener los insumos reales de estas órdenes desde order_items
       List<Map<String, dynamic>> orderItems = [];
       try {
         final itemsRes = await supabase
@@ -90,84 +86,86 @@ class _CrmScreenState extends State<CrmScreen> {
             .filter('order_id', 'in', myOrderIds.toList());
         orderItems = List<Map<String, dynamic>>.from(itemsRes);
       } catch (e) {
-        debugPrint("Error obteniendo order_items: $e");
+        debugPrint("Error obteniendo order_items en CRM Distribuidor: $e");
       }
 
-      double spent = 0.0;
-      final Map<String, double> supplierMap = {};
-      final Map<String, double> itemAmountMap = {};
+      double revenue = 0.0;
+      final Map<String, double> productSales = {};
+      final Map<String, List<num>> clientStats = {};
 
-      // 4. Calcular gasto total y agrupar por distribuidor usando la BD
+      // 4. Calcular facturación y clientes
       for (var o in orders) {
-        final double amount = (o['total_amount'] as num?)?.toDouble() ?? 
-                             (o['total'] as num?)?.toDouble() ?? 0.0;
-        spent += amount;
+        final double total = (o['total_amount'] as num?)?.toDouble() ??
+            (o['total'] as num?)?.toDouble() ??
+            0.0;
+        revenue += total;
 
-        final sId = o['supplier_id']?.toString() ?? '';
+        final restId = o['restaurant_id']?.toString() ?? '';
+        String client = '';
 
-        String supName = '';
-        if (supplierNames.containsKey(sId)) {
-          supName = supplierNames[sId]!;
-        } else if (o['supplier_name'] != null && o['supplier_name'].toString().trim().isNotEmpty) {
-          supName = o['supplier_name'].toString().trim();
-        } else if (o['supplier_business_name'] != null && o['supplier_business_name'].toString().trim().isNotEmpty) {
-          supName = o['supplier_business_name'].toString().trim();
+        if (restaurantNames.containsKey(restId)) {
+          client = restaurantNames[restId]!;
+        } else if (o['restaurant_name'] != null && o['restaurant_name'].toString().trim().isNotEmpty) {
+          client = o['restaurant_name'].toString().trim();
+        } else if (o['business_name'] != null && o['business_name'].toString().trim().isNotEmpty) {
+          client = o['business_name'].toString().trim();
         } else {
-          // Si por alguna razón la cuenta no tiene nombre configurado en profiles
-          supName = 'Distribuidor ${sId.length > 8 ? sId.substring(0, 8) : sId}';
+          client = restId.isNotEmpty
+              ? 'Restaurante ${restId.length > 8 ? restId.substring(0, 8) : restId}'
+              : 'Restaurante';
         }
 
-        supplierMap[supName] = (supplierMap[supName] ?? 0.0) + amount;
+        if (!clientStats.containsKey(client)) {
+          clientStats[client] = [0, 0.0];
+        }
+        clientStats[client]![0] = (clientStats[client]![0] as int) + 1;
+        clientStats[client]![1] = (clientStats[client]![1] as double) + total;
       }
 
-      // 5. Agrupar insumos vendidos con los datos de order_items y products
+      // 5. Acumular las ventas exactas por insumo desde la BD
       for (var it in orderItems) {
         String prodName = 'Insumo';
         if (it['products'] != null && it['products']['name'] != null) {
           prodName = it['products']['name'].toString();
         } else if (it['product_name'] != null) {
           prodName = it['product_name'].toString();
+        } else if (it['name'] != null) {
+          prodName = it['name'].toString();
         }
 
         final double subtotal = (it['subtotal'] as num?)?.toDouble() ??
             ((it['unit_price'] as num? ?? 0.0) * (it['quantity'] as num? ?? 1)).toDouble();
 
-        itemAmountMap[prodName] = (itemAmountMap[prodName] ?? 0.0) + subtotal;
+        productSales[prodName] = (productSales[prodName] ?? 0.0) + subtotal;
       }
 
-      final sortedSuppliers = supplierMap.entries.toList()
+      final sortedProducts = productSales.entries.toList()
         ..sort((a, b) => b.value.compareTo(a.value));
-      final sortedItems = itemAmountMap.entries.toList()
-        ..sort((a, b) => b.value.compareTo(a.value));
+      final sortedClients = clientStats.entries.toList()
+        ..sort((a, b) => (b.value[0]).compareTo(a.value[0]));
 
       if (mounted) {
         setState(() {
           _totalOrders = orders.length;
-          _totalSpent = spent;
-          _topSuppliers = sortedSuppliers;
-          _topSupplies = sortedItems;
+          _totalRevenue = revenue;
+          _topProducts = sortedProducts;
+          _topClientsByOrders = sortedClients;
           _isLoading = false;
         });
       }
     } catch (e) {
-      debugPrint("Error calculando analítica: $e");
+      debugPrint("Error calculando analítica de Distribuidor: $e");
       if (mounted) setState(() => _isLoading = false);
     }
   }
-
-
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('CRM & Analítica',
-            style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('CRM & Rendimiento', style: TextStyle(fontWeight: FontWeight.bold)),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadCrmData,
-          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadAnalytics),
         ],
       ),
       body: _isLoading
@@ -177,23 +175,22 @@ class _CrmScreenState extends State<CrmScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Métricas Principales
                   Row(
                     children: [
                       Expanded(
                         child: _MetricCard(
-                          title: 'Gasto Total',
-                          value: '\$${_totalSpent.toStringAsFixed(2)}',
-                          icon: Icons.account_balance_wallet_outlined,
+                          title: 'Facturación Total',
+                          value: '\$${_totalRevenue.toStringAsFixed(2)}',
+                          icon: Icons.payments_outlined,
                           color: AppColors.tealMint,
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: _MetricCard(
-                          title: 'Pedidos Hechos',
+                          title: 'Despachos Realizados',
                           value: '$_totalOrders',
-                          icon: Icons.receipt_long_outlined,
+                          icon: Icons.local_shipping_outlined,
                           color: AppColors.primaryBlue,
                         ),
                       ),
@@ -201,20 +198,16 @@ class _CrmScreenState extends State<CrmScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // Insumos Más Pedidos
                   const Text(
-                    'Insumos Más Pedidos (Monto Invertido)',
+                    'Insumos Más Vendidos',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 12),
-                  if (_topSupplies.isEmpty)
-                    const Text('No hay compras registradas aún.',
-                        style: TextStyle(color: AppColors.subtitleGrey))
+                  if (_topProducts.isEmpty)
+                    const Text('Aún no hay insumos registrados en órdenes.', style: TextStyle(color: AppColors.subtitleGrey))
                   else
-                    ..._topSupplies.map((entry) {
-                      final maxVal = _topSupplies.first.value > 0
-                          ? _topSupplies.first.value
-                          : 1.0;
+                    ..._topProducts.map((entry) {
+                      final maxVal = _topProducts.first.value > 0 ? _topProducts.first.value : 1.0;
                       final percent = (entry.value / maxVal).clamp(0.0, 1.0);
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 12),
@@ -224,13 +217,9 @@ class _CrmScreenState extends State<CrmScreen> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text(entry.key,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w600)),
+                                Text(entry.key, style: const TextStyle(fontWeight: FontWeight.w600)),
                                 Text('\$${entry.value.toStringAsFixed(2)}',
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: AppColors.primaryBlue)),
+                                    style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.primaryBlue)),
                               ],
                             ),
                             const SizedBox(height: 6),
@@ -250,23 +239,22 @@ class _CrmScreenState extends State<CrmScreen> {
 
                   const SizedBox(height: 24),
 
-                  // Distribuidores Principales
                   const Text(
-                    'Distribuidores Principales',
+                    'Top Restaurantes por Frecuencia de Pedidos',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 12),
-                  if (_topSuppliers.isEmpty)
-                    const Text('No hay distribuidores recurrentes aún.',
-                        style: TextStyle(color: AppColors.subtitleGrey))
+                  if (_topClientsByOrders.isEmpty)
+                    const Text('Aún no hay clientes registrados.', style: TextStyle(color: AppColors.subtitleGrey))
                   else
-                    ..._topSuppliers.map((entry) {
-                      final maxVal = _topSuppliers.first.value > 0
-                          ? _topSuppliers.first.value
-                          : 1.0;
-                      final percent = (entry.value / maxVal).clamp(0.0, 1.0);
+                    ..._topClientsByOrders.map((entry) {
+                      final int orderCount = entry.value[0].toInt();
+                      final double totalSpent = entry.value[1].toDouble();
+                      final int maxOrders = _topClientsByOrders.first.value[0].toInt();
+                      final percent = maxOrders > 0 ? (orderCount / maxOrders).clamp(0.0, 1.0) : 1.0;
+
                       return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.only(bottom: 14),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -275,18 +263,15 @@ class _CrmScreenState extends State<CrmScreen> {
                               children: [
                                 Row(
                                   children: [
-                                    const Icon(Icons.local_shipping_outlined,
-                                        size: 16, color: AppColors.tealMint),
-                                    const SizedBox(width: 6),
-                                    Text(entry.key,
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.w600)),
+                                    const Icon(Icons.storefront, size: 18, color: AppColors.tealMint),
+                                    const SizedBox(width: 8),
+                                    Text(entry.key, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
                                   ],
                                 ),
-                                Text('\$${entry.value.toStringAsFixed(2)}',
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: AppColors.tealMint)),
+                                Text(
+                                  '$orderCount pedidos (\$${totalSpent.toStringAsFixed(2)})',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.tealMint),
+                                ),
                               ],
                             ),
                             const SizedBox(height: 6),
@@ -341,13 +326,9 @@ class _MetricCard extends StatelessWidget {
             child: Icon(icon, size: 20, color: color),
           ),
           const SizedBox(height: 12),
-          Text(title,
-              style: const TextStyle(
-                  fontSize: 12, color: AppColors.subtitleGrey)),
+          Text(title, style: const TextStyle(fontSize: 12, color: AppColors.subtitleGrey)),
           const SizedBox(height: 4),
-          Text(value,
-              style:
-                  const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
         ],
       ),
     );

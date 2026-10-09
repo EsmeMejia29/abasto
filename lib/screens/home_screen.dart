@@ -4,6 +4,7 @@ import '../models/supplier.dart';
 import '../theme/app_theme.dart';
 import '../config/session_manager.dart';
 import 'supplier_detail_screen.dart';
+import '../widgets/business_info_sheet.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -20,7 +21,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _searchCtrl = TextEditingController();
 
   String _restaurantName = 'Mi Restaurante';
-  String _restaurantLocation = 'El Salvador';
+  String _restaurantLocation = '';
 
   final List<String> _categories = [
     'Todos',
@@ -64,8 +65,6 @@ class _HomeScreenState extends State<HomeScreen> {
           if (res['address'] != null &&
               res['address'].toString().trim().isNotEmpty) {
             _restaurantLocation = res['address'];
-          } else {
-            _restaurantLocation = 'Cuenta Restaurante B2B';
           }
         });
       }
@@ -73,26 +72,42 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<List<Supplier>> _fetchSuppliers() async {
-    // Especificamos explícitamente la relación foreign key para evitar la ambigüedad PGRST201
-    final response = await supabase.from('supplier_details').select('''
-      *,
-      profiles!supplier_details_profile_id_fkey (
-        business_name,
-        address,
-        phone
-      )
-    ''');
+    final detailsRes = await supabase.from('supplier_details').select('*');
 
-    final dataList = response as List<dynamic>;
+    List<dynamic> profilesRes = [];
+    try {
+      profilesRes = await supabase
+          .from('profiles')
+          .select(
+              'id, business_name, address, phone, avatar_url, rating, reviews_count')
+          .eq('role', 'supplier');
+    } catch (_) {
+      profilesRes = await supabase
+          .from('profiles')
+          .select('id, business_name, address, phone')
+          .eq('role', 'supplier');
+    }
 
-    final list = dataList.map((item) {
+    final profilesMap = {
+      for (var p in profilesRes)
+        p['id'].toString(): p as Map<String, dynamic>
+    };
+
+    final list = (detailsRes as List<dynamic>).map((item) {
       final map = Map<String, dynamic>.from(item as Map<String, dynamic>);
-      final profile = map['profiles'] as Map<String, dynamic>?;
+      final profId = map['profile_id']?.toString() ?? '';
 
-      if (profile != null && profile['business_name'] != null) {
-        map['business_name'] = profile['business_name'];
+      if (profilesMap.containsKey(profId)) {
+        final prof = profilesMap[profId]!;
+        map['business_name'] = prof['business_name'];
+        map['avatar_url'] = prof['avatar_url'];
+        if (prof['rating'] != null) {
+          map['rating'] = prof['rating'];
+        }
+        if (prof['reviews_count'] != null) {
+          map['reviews_count'] = prof['reviews_count'];
+        }
       }
-
       return Supplier.fromMap(map);
     }).toList();
 
@@ -117,6 +132,27 @@ class _HomeScreenState extends State<HomeScreen> {
         return matchesQuery && matchesCategory;
       }).toList();
     });
+  }
+
+  Widget _buildSupplierAvatar(Supplier supplier) {
+    if (supplier.avatarUrl != null && supplier.avatarUrl!.isNotEmpty) {
+      return CircleAvatar(
+        radius: 24,
+        backgroundImage: NetworkImage(supplier.avatarUrl!),
+      );
+    }
+    return CircleAvatar(
+      radius: 24,
+      backgroundColor: AppColors.primaryBlue.withOpacity(0.12),
+      child: Text(
+        supplier.name.isNotEmpty ? supplier.name[0].toUpperCase() : 'D',
+        style: const TextStyle(
+          color: AppColors.primaryBlue,
+          fontWeight: FontWeight.bold,
+          fontSize: 18,
+        ),
+      ),
+    );
   }
 
   @override
@@ -144,67 +180,36 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          // Banner superior dinámico con el perfil real del usuario
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             color: AppColors.tealMint.withOpacity(0.12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _restaurantName,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.navyDark,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        _restaurantLocation,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.subtitleGrey,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                Text(
+                  _restaurantName,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.navyDark,
                   ),
+                  overflow: TextOverflow.ellipsis,
                 ),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.tealMint,
-                    borderRadius: BorderRadius.circular(12),
+                if (_restaurantLocation.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    _restaurantLocation,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.subtitleGrey,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.verified, color: Colors.white, size: 14),
-                      SizedBox(width: 4),
-                      Text(
-                        'Canal B2B',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                ],
               ],
             ),
           ),
-
-          // Buscador
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
             child: TextField(
@@ -229,8 +234,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-
-          // Chips de categorías
           SizedBox(
             height: 48,
             child: ListView.separated(
@@ -261,10 +264,7 @@ class _HomeScreenState extends State<HomeScreen> {
               },
             ),
           ),
-
           const SizedBox(height: 6),
-
-          // Lista de Distribuidores
           Expanded(
             child: FutureBuilder<List<Supplier>>(
               future: _suppliersFuture,
@@ -326,74 +326,97 @@ class _HomeScreenState extends State<HomeScreen> {
                         },
                         child: Padding(
                           padding: const EdgeInsets.all(14),
-                          child: Column(
+                          child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      supplier.name,
-                                      style: const TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                        color: AppColors.navyDark,
-                                      ),
-                                    ),
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: Colors.amber.shade50,
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(
-                                          color: Colors.amber.shade200),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
+                              _buildSupplierAvatar(supplier),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
                                       children: [
-                                        const Icon(Icons.star,
-                                            size: 15, color: Colors.amber),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          '${supplier.rating.toStringAsFixed(1)} (${supplier.reviewsCount})',
-                                          style: const TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.bold,
+                                        Expanded(
+                                          child: Text(
+                                            supplier.name,
+                                            style: const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                              color: AppColors.navyDark,
+                                            ),
+                                          ),
+                                        ),
+                                        InkWell(
+                                          onTap: () {
+                                            BusinessInfoSheet.show(
+                                              context,
+                                              businessId: supplier.id,
+                                              defaultName: supplier.name,
+                                              role: 'supplier',
+                                            );
+                                          },
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 8, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: Colors.amber.shade50,
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                              border: Border.all(
+                                                  color: Colors.amber.shade200),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(Icons.star,
+                                                    size: 15,
+                                                    color: Colors.amber),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  '${supplier.rating.toStringAsFixed(1)} (${supplier.reviewsCount})',
+                                                  style: const TextStyle(
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
                                           ),
                                         ),
                                       ],
                                     ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                supplier.category,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: AppColors.subtitleGrey,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Row(
-                                children: [
-                                  const Icon(Icons.local_shipping_outlined,
-                                      size: 15, color: AppColors.primaryBlue),
-                                  const SizedBox(width: 6),
-                                  Expanded(
-                                    child: Text(
-                                      'Ruta: ${supplier.deliveryDays}',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.grey.shade700,
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      supplier.category,
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        color: AppColors.subtitleGrey,
                                       ),
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(height: 6),
+                                    Row(
+                                      children: [
+                                        const Icon(
+                                            Icons.local_shipping_outlined,
+                                            size: 15,
+                                            color: AppColors.primaryBlue),
+                                        const SizedBox(width: 6),
+                                        Expanded(
+                                          child: Text(
+                                            'Ruta: ${supplier.deliveryDays}',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.grey.shade700,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
                               ),
                             ],
                           ),

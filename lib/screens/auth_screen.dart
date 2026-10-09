@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../main.dart';
 import '../config/session_manager.dart';
+import '../main.dart';
 import '../theme/app_theme.dart';
 import '../utils/error_handler.dart';
 import 'restaurant_onboarding_screen.dart';
@@ -74,6 +74,7 @@ class _AuthScreenState extends State<AuthScreen> {
         final res = await supabase.auth.signUp(
           email: email,
           password: password,
+          emailRedirectTo: 'https://abasto-flame.vercel.app/',
         );
 
         final newUserId = res.user?.id;
@@ -112,39 +113,39 @@ class _AuthScreenState extends State<AuthScreen> {
         }
 
         // Cerrar la sesión activa generada por el registro
-          await supabase.auth.signOut();
+        await supabase.auth.signOut();
 
-          if (mounted) {
-            setState(() {
-              _isLogin = true;
-              _passwordCtrl.clear();
-              _businessNameCtrl.clear();
-            });
+        if (mounted) {
+          setState(() {
+            _isLogin = true;
+            _passwordCtrl.clear();
+            _businessNameCtrl.clear();
+          });
 
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      '¡Cuenta registrada con éxito!',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Hemos enviado un enlace a $email. Revisa tu bandeja de entrada o spam para confirmar tu correo antes de ingresar.',
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ],
-                ),
-                backgroundColor: AppColors.tealMint,
-                behavior: SnackBarBehavior.floating,
-                duration: const Duration(seconds: 6),
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '¡Cuenta registrada con éxito!',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Hemos enviado un enlace a $email. Revisa tu bandeja de entrada o spam para confirmar tu correo antes de ingresar.',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
               ),
-            );
-          }
-          return;
+              backgroundColor: AppColors.tealMint,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 6),
+            ),
+          );
+        }
+        return;
       }
 
       // ========================================================
@@ -157,16 +158,23 @@ class _AuthScreenState extends State<AuthScreen> {
 
       final currentUserId = res.user?.id;
       if (currentUserId != null) {
+        // Consultamos rol y nombre comercial para detectar con certeza si es distribuidor
         final prof = await supabase
             .from('profiles')
-            .select('role')
+            .select('role, business_name')
             .eq('id', currentUserId)
             .maybeSingle();
 
         if (prof != null) {
-          final roleStr = prof['role'] as String?;
-          final userRole =
-              roleStr == 'supplier' ? UserRole.supplier : UserRole.restaurant;
+          final roleStr = (prof['role'] ?? '').toString().toLowerCase().trim();
+          final bName = (prof['business_name'] ?? '').toString().toLowerCase().trim();
+
+          final bool isSupplier = roleStr == 'supplier' ||
+              roleStr == 'distribuidor' ||
+              roleStr == 'proveedor' ||
+              bName.contains('distribuidor');
+
+          final userRole = isSupplier ? UserRole.supplier : UserRole.restaurant;
           SessionManager.switchRole(userRole);
           _role = userRole;
         }
@@ -213,13 +221,21 @@ class _AuthScreenState extends State<AuthScreen> {
         }
       }
 
-      // Solo si el login fue exitoso y el onboarding ya está completado
+      // Redirección condicionada según el rol real del usuario
       if (mounted) {
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (context) => const MainNavigationHolder()),
-          (route) => false,
-        );
+        if (_role == UserRole.supplier) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (context) => const SupplierNavigationHolder()),
+            (route) => false,
+          );
+        } else {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (context) => const MainNavigationHolder()),
+            (route) => false,
+          );
+        }
       }
     } catch (e) {
       if (mounted) {

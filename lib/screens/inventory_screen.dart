@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import '../main.dart';
-import '../config/session_manager.dart';
 import '../theme/app_theme.dart';
-import '../utils/error_handler.dart';
+import '../config/session_manager.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
@@ -12,7 +11,7 @@ class InventoryScreen extends StatefulWidget {
 }
 
 class _InventoryScreenState extends State<InventoryScreen> {
-  late Future<List<Map<String, dynamic>>> _inventoryFuture;
+  late Future<Map<String, dynamic>> _inventoryFuture;
 
   String get _currentUserId =>
       supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
@@ -20,116 +19,60 @@ class _InventoryScreenState extends State<InventoryScreen> {
   @override
   void initState() {
     super.initState();
-    _inventoryFuture = _fetchInventory();
+    _inventoryFuture = _fetchInventoryData();
   }
 
-  Future<List<Map<String, dynamic>>> _fetchInventory() async {
-    // Consulta filtrada estrictamente por el restaurante logueado
-    final response = await supabase
-        .from('restaurant_inventory')
-        .select('*')
-        .eq('restaurant_id', _currentUserId)
-        .order('total_spent', ascending: false);
-
-    return List<Map<String, dynamic>>.from(response);
+  void _refresh() {
+    setState(() {
+      _inventoryFuture = _fetchInventoryData();
+    });
   }
 
-  Future<void> _showAddInventoryItemDialog() async {
-    final nameCtrl = TextEditingController();
-    final catCtrl = TextEditingController(text: 'Verduras');
-    final stockCtrl = TextEditingController();
-    final unitCtrl = TextEditingController(text: 'libras');
-    final spentCtrl = TextEditingController();
+  Future<Map<String, dynamic>> _fetchInventoryData() async {
+    final userId = _currentUserId;
 
-    await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Registrar Insumo en Bodega'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Nombre del insumo (ej. Tomate de ensalada)'),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: catCtrl,
-                decoration: const InputDecoration(labelText: 'Categoría (Lácteos, Carnes, Verduras)'),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: stockCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Stock actual'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: unitCtrl,
-                      decoration: const InputDecoration(labelText: 'Unidad (lb, cajas, fardos)'),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: spentCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Gasto total (\$ USD)',
-                  hintText: 'Opcional (0.00)',
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryBlue),
-            onPressed: () async {
-              final stock = double.tryParse(stockCtrl.text.trim()) ?? 0.0;
-              final spent = double.tryParse(spentCtrl.text.trim()) ?? 0.0;
+    // 1. Obtener órdenes entregadas para asegurar cálculo acumulado en tiempo real
+    final deliveredOrders = await supabase
+        .from('orders')
+        .select('''
+          id, code, total_amount, updated_at,
+          order_items (product_name, quantity, unit_price)
+        ''')
+        .eq('restaurant_id', userId)
+        .eq('status', 'entregado');
 
-              if (nameCtrl.text.trim().isNotEmpty) {
-                try {
-                  await supabase.from('restaurant_inventory').insert({
-                    'restaurant_id': _currentUserId,
-                    'product_name': nameCtrl.text.trim(),
-                    'category': catCtrl.text.trim().isEmpty ? 'General' : catCtrl.text.trim(),
-                    'current_stock': stock,
-                    'unit': unitCtrl.text.trim().isEmpty ? 'unidades' : unitCtrl.text.trim(),
-                    'total_spent': spent,
-                  });
+    double totalSpent = 0.0;
+    final Map<String, Map<String, dynamic>> inventoryItems = {};
 
-                  if (mounted) {
-                    Navigator.pop(context);
-                    setState(() => _inventoryFuture = _fetchInventory());
-                  }
-                } catch (e) {
-                  if (mounted) {
-                    final msg = ErrorHandler.parse(e);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(msg), backgroundColor: Colors.red),
-                    );
-                  }
-                }
-              }
-            },
-            child: const Text('Guardar', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
+    for (var ord in (deliveredOrders as List<dynamic>)) {
+      final items = (ord['order_items'] as List<dynamic>?) ?? [];
+      for (var it in items) {
+        final name = it['product_name']?.toString() ?? 'Insumo';
+        final qty = (it['quantity'] as num?)?.toDouble() ?? 1.0;
+        final unitPrice = (it['unit_price'] as num?)?.toDouble() ?? 0.0;
+        final cost = qty * unitPrice;
+
+        totalSpent += cost;
+
+        if (inventoryItems.containsKey(name)) {
+          inventoryItems[name]!['quantity'] += qty;
+          inventoryItems[name]!['total_spent'] += cost;
+        } else {
+          inventoryItems[name] = {
+            'name': name,
+            'quantity': qty,
+            'unit_price': unitPrice,
+            'total_spent': cost,
+            'last_order': ord['code'] ?? '',
+          };
+        }
+      }
+    }
+
+    return {
+      'totalSpent': totalSpent,
+      'items': inventoryItems.values.toList(),
+    };
   }
 
   @override
@@ -138,47 +81,41 @@ class _InventoryScreenState extends State<InventoryScreen> {
       appBar: AppBar(
         title: const Text('Mi Inventario y Gastos'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline),
-            tooltip: 'Agregar insumo',
-            onPressed: _showAddInventoryItemDialog,
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => setState(() => _inventoryFuture = _fetchInventory()),
-          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _refresh),
         ],
       ),
-      body: FutureBuilder<List<Map<String, dynamic>>>(
+      body: FutureBuilder<Map<String, dynamic>>(
         future: _inventoryFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
+          if (snapshot.hasError) {
+            return Center(
+              child: Text('Error: ${snapshot.error}',
+                  style: const TextStyle(color: Colors.red)),
+            );
+          }
 
-          final items = snapshot.data ?? [];
-          final totalExpenditure = items.fold<double>(
-            0.0,
-            (acc, curr) => acc + ((curr['total_spent'] as num?)?.toDouble() ?? 0.0),
-          );
-
-          final maxExpense = items.isEmpty
-              ? 1.0
-              : items
-                  .map((e) => (e['total_spent'] as num?)?.toDouble() ?? 0.0)
-                  .reduce((a, b) => a > b ? a : b);
+          final data = snapshot.data ?? {};
+          final double totalSpent = data['totalSpent'] ?? 0.0;
+          final List<dynamic> items = data['items'] ?? [];
 
           return SingleChildScrollView(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Resumen superior del gasto total
+                // Tarjeta de Gasto Total Acumulado
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    gradient: AppColors.logoGradient,
+                    gradient: const LinearGradient(
+                      colors: [AppColors.navyDark, AppColors.tealMint],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Column(
@@ -190,26 +127,27 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        '\$${totalExpenditure.toStringAsFixed(2)}',
+                        '\$${totalSpent.toStringAsFixed(2)}',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 32,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 4),
                       Text(
-                        items.isEmpty
-                            ? 'Aún no tienes insumos registrados en bodega'
-                            : '${items.length} productos registrados en bodega',
+                        items.isNotEmpty
+                            ? '${items.length} insumos entregados en bodega'
+                            : 'Aún no tienes insumos entregados en bodega',
                         style: const TextStyle(color: Colors.white70, fontSize: 12),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 24),
 
-                // Sección de Gráficas de Gastos
+                const SizedBox(height: 20),
+
+                // Desglose de Gastos
                 const Text(
                   '¿En qué se gastó más? (Análisis de Insumos)',
                   style: TextStyle(
@@ -218,90 +156,88 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     color: AppColors.navyDark,
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
 
-                if (items.isEmpty || totalExpenditure == 0.0)
-                  Card(
-                    elevation: 1,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    child: Padding(
-                      padding: const EdgeInsets.all(20.0),
-                      child: Column(
-                        children: [
-                          Icon(Icons.bar_chart_outlined, size: 48, color: Colors.grey.shade400),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'Sin registros de gastos',
-                            style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.navyDark),
-                          ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'A medida que agregues insumos con sus montos de compra o confirmes pedidos, verás aquí la gráfica de distribución de tus costos.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 12, color: AppColors.subtitleGrey),
-                          ),
-                        ],
-                      ),
+                if (items.isEmpty)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade200),
+                    ),
+                    child: Column(
+                      children: const [
+                        Icon(Icons.bar_chart, size: 48, color: Colors.grey),
+                        SizedBox(height: 8),
+                        Text(
+                          'Sin registros de gastos',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'A medida que los pedidos cambien a "Entregado", verás el análisis de costos aquí.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              color: AppColors.subtitleGrey, fontSize: 12),
+                        ),
+                      ],
                     ),
                   )
                 else
-                  Card(
-                    elevation: 1.5,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        children: items.take(5).map((item) {
-                          final name = item['product_name'] ?? '';
-                          final spent = (item['total_spent'] as num?)?.toDouble() ?? 0.0;
-                          final percentage = totalExpenditure > 0 ? (spent / totalExpenditure) * 100 : 0.0;
-                          final barRatio = maxExpense > 0 ? (spent / maxExpense) : 0.0;
+                  ...items.map((it) {
+                    final double itemCost = it['total_spent'] ?? 0.0;
+                    final pct = totalSpent > 0 ? (itemCost / totalSpent) : 0.0;
 
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      name,
-                                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                                    ),
-                                    Text(
-                                      '\$${spent.toStringAsFixed(2)} (${percentage.toStringAsFixed(1)}%)',
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 13,
-                                        color: AppColors.primaryBlue,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 6),
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(6),
-                                  child: LinearProgressIndicator(
-                                    value: barRatio.clamp(0.0, 1.0),
-                                    minHeight: 10,
-                                    backgroundColor: Colors.grey.shade200,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      barRatio > 0.6 ? AppColors.tealMint : AppColors.primaryBlue,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        }).toList(),
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.grey.shade200),
                       ),
-                    ),
-                  ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(it['name'] ?? '',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold)),
+                              Text('\$${itemCost.toStringAsFixed(2)}',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: AppColors.primaryBlue)),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: pct,
+                              backgroundColor: Colors.grey.shade100,
+                              valueColor: const AlwaysStoppedAnimation<Color>(
+                                  AppColors.tealMint),
+                              minHeight: 6,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Representa el ${(pct * 100).toStringAsFixed(1)}% del gasto en insumos',
+                            style: const TextStyle(
+                                fontSize: 11, color: AppColors.subtitleGrey),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
 
                 const SizedBox(height: 24),
 
-                // Lista de Existencias en Bodega
+                // Existencias en Bodega
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -313,67 +249,89 @@ class _InventoryScreenState extends State<InventoryScreen> {
                         color: AppColors.navyDark,
                       ),
                     ),
-                    TextButton.icon(
-                      onPressed: _showAddInventoryItemDialog,
-                      icon: const Icon(Icons.add, size: 16),
-                      label: const Text('Nuevo Insumo'),
+                    Text(
+                      '${items.length} productos',
+                      style: const TextStyle(
+                          color: AppColors.subtitleGrey, fontSize: 12),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
 
                 if (items.isEmpty)
                   Center(
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 24.0),
+                      padding: const EdgeInsets.all(24.0),
                       child: Column(
-                        children: [
-                          Icon(Icons.inventory_2_outlined, size: 52, color: Colors.grey.shade300),
-                          const SizedBox(height: 8),
-                          const Text(
+                        children: const [
+                          Icon(Icons.inventory_2_outlined,
+                              size: 48, color: Colors.grey),
+                          SizedBox(height: 8),
+                          Text(
                             'Tu bodega está vacía',
-                            style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.subtitleGrey),
+                            style: TextStyle(fontWeight: FontWeight.bold),
                           ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Toca en "+ Nuevo Insumo" para empezar a registrar existencias.',
-                            style: TextStyle(fontSize: 12, color: AppColors.subtitleGrey),
+                          SizedBox(height: 4),
+                          Text(
+                            'Los pedidos entregados ingresarán existencias automáticamente.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                color: AppColors.subtitleGrey, fontSize: 12),
                           ),
                         ],
                       ),
                     ),
                   )
                 else
-                  ...items.map((item) {
-                    final name = item['product_name'] ?? '';
-                    final category = item['category'] ?? 'General';
-                    final stock = item['current_stock'] ?? 0;
-                    final unit = item['unit'] ?? '';
-
-                    return Card(
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: AppColors.tealMint.withOpacity(0.15),
-                          child: const Icon(Icons.kitchen, color: AppColors.primaryBlue),
+                  ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: items.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, idx) {
+                      final item = items[idx];
+                      return Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey.shade200),
                         ),
-                        title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text('Categoría: $category'),
-                        trailing: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade100,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.grey.shade300),
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor:
+                                AppColors.tealMint.withOpacity(0.15),
+                            child: const Icon(Icons.check_circle_outline,
+                                color: AppColors.tealMint),
                           ),
-                          child: Text(
-                            '$stock $unit',
-                            style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.navyDark),
+                          title: Text(item['name'] ?? '',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold)),
+                          subtitle: Text(
+                              'Último ingreso: Pedido ${item['last_order']}'),
+                          trailing: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                '${item['quantity']} unid.',
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.navyDark,
+                                ),
+                              ),
+                              Text(
+                                '\$${(item['total_spent'] as num).toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.subtitleGrey),
+                              ),
+                            ],
                           ),
                         ),
-                      ),
-                    );
-                  }),
+                      );
+                    },
+                  ),
               ],
             ),
           );

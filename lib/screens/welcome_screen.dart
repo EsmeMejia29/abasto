@@ -50,12 +50,12 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
               SegmentedButton<UserRole>(
                 segments: const [
-                  ButtonSegment(
+                  ButtonSegment<UserRole>(
                     value: UserRole.restaurant,
                     label: Text('Restaurante'),
-                    icon: Icon(Icons.restaurant),
+                    icon: Icon(Icons.check),
                   ),
-                  ButtonSegment(
+                  ButtonSegment<UserRole>(
                     value: UserRole.supplier,
                     label: Text('Distribuidor'),
                     icon: Icon(Icons.local_shipping),
@@ -67,6 +67,16 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                     _selectedRole = newSelection.first;
                   });
                 },
+                style: SegmentedButton.styleFrom(
+                  selectedBackgroundColor: const Color(0xFF26A69A), // Verde menta / teal característico
+                  selectedForegroundColor: Colors.white,            // Texto e icono en blanco
+                  backgroundColor: Colors.white,                    // Fondo del no seleccionado
+                  foregroundColor: const Color(0xFF334155),         // Texto del no seleccionado
+                  side: const BorderSide(color: Color(0xFFCBD5E1)), // Borde sutil gris
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24),        // Bordes redondeados elegantes
+                  ),
+                ),
               ),
 
               const Spacer(),

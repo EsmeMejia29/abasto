@@ -5,6 +5,8 @@ import '../../theme/app_theme.dart';
 import '../../utils/error_handler.dart';
 import '../../models/order.dart';
 import '../order_chat_screen.dart';
+import '../../widgets/review_dialog.dart';
+import '../../widgets/business_info_sheet.dart';
 
 class SupplierIncomingOrdersScreen extends StatefulWidget {
   const SupplierIncomingOrdersScreen({super.key});
@@ -36,20 +38,18 @@ class _SupplierIncomingOrdersScreenState
   Future<List<Map<String, dynamic>>> _fetchOrders() async {
     final userId = _currentUserId;
 
-    // 1. Obtener el ID alternativo de supplier_details si existiera
     String? suppDetailId;
     try {
       final detail = await supabase
           .from('supplier_details')
-          .select('id')
+          .select('profile_id')
           .eq('profile_id', userId)
           .maybeSingle();
-      if (detail != null && detail['id'] != null) {
-        suppDetailId = detail['id'].toString();
+      if (detail != null && detail['profile_id'] != null) {
+        suppDetailId = detail['profile_id'].toString();
       }
     } catch (_) {}
 
-    // 2. Traer órdenes filtradas por cualquiera de los dos IDs
     final query = supabase.from('orders').select('''
       *,
       order_items (*)
@@ -65,7 +65,6 @@ class _SupplierIncomingOrdersScreenState
 
     final orders = List<Map<String, dynamic>>.from(response);
 
-    // 3. Obtener nombres de los restaurantes desde profiles
     final restaurantIds = orders
         .map((o) => o['restaurant_id']?.toString())
         .where((id) => id != null && id.isNotEmpty)
@@ -76,7 +75,7 @@ class _SupplierIncomingOrdersScreenState
       try {
         final profilesRes = await supabase
             .from('profiles')
-            .select('id, business_name, phone')
+            .select('id, business_name, phone, address, nrc_nit')
             .filter('id', 'in', restaurantIds);
 
         final profileMap = {
@@ -89,6 +88,8 @@ class _SupplierIncomingOrdersScreenState
           if (restId != null && profileMap.containsKey(restId)) {
             o['restaurant_name'] = profileMap[restId]!['business_name'];
             o['restaurant_phone'] = profileMap[restId]!['phone'];
+            o['restaurant_address'] = profileMap[restId]!['address'];
+            o['restaurant_nrc'] = profileMap[restId]!['nrc_nit'];
           } else {
             o['restaurant_name'] = 'Restaurante';
           }
@@ -101,10 +102,34 @@ class _SupplierIncomingOrdersScreenState
 
   Future<void> _updateOrderStatus(String orderId, String newStatus) async {
     try {
-      await supabase
+      final cur = await supabase
           .from('orders')
-          .update({'status': newStatus})
-          .eq('id', orderId);
+          .select('status_history')
+          .eq('id', orderId)
+          .maybeSingle();
+
+      List<dynamic> history = [];
+      if (cur != null && cur['status_history'] != null) {
+        history = List<dynamic>.from(cur['status_history']);
+      }
+
+      history.add({
+        'status': newStatus,
+        'changed_at': DateTime.now().toIso8601String(),
+        'note': 'Actualizado por distribuidor',
+      });
+
+      try {
+        await supabase.from('orders').update({
+          'status': newStatus,
+          'status_history': history,
+          'updated_at': DateTime.now().toIso8601String(),
+        }).eq('id', orderId);
+      } catch (_) {
+        await supabase
+            .from('orders')
+            .update({'status': newStatus}).eq('id', orderId);
+      }
 
       _refresh();
 
@@ -236,9 +261,10 @@ class _SupplierIncomingOrdersScreenState
               final orderId = order['id']?.toString() ?? '';
               final code = order['code'] ?? 'ORD-000';
               final restaurantName = order['restaurant_name'] ?? 'Restaurante';
+              final restaurantId = order['restaurant_id']?.toString() ?? '';
               final totalAmount =
                   (order['total_amount'] as num?)?.toDouble() ?? 0.0;
-              final status = order['status'] ?? 'Pendiente';
+              final status = order['status'] ?? 'pendiente';
               final items = (order['order_items'] as List<dynamic>?) ?? [];
 
               return Card(
@@ -267,12 +293,74 @@ class _SupplierIncomingOrdersScreenState
                                 ),
                               ),
                               const SizedBox(height: 2),
-                              Text(
-                                'Cliente: $restaurantName',
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: AppColors.subtitleGrey,
-                                  fontWeight: FontWeight.w600,
+                              const SizedBox(height: 6),
+                              InkWell(
+                                borderRadius: BorderRadius.circular(8),
+                                onTap: () {
+                                  BusinessInfoSheet.show(
+                                    context,
+                                    businessId: restaurantId,
+                                    defaultName: restaurantName,
+                                    role: 'restaurant',
+                                  );
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primaryBlue.withOpacity(0.08),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: AppColors.primaryBlue.withOpacity(0.25),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.storefront_outlined,
+                                        size: 16,
+                                        color: AppColors.primaryBlue,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        restaurantName,
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.bold,
+                                          color: AppColors.primaryBlue,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: const [
+                                            Text(
+                                              'Ver Ficha',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w600,
+                                                color: AppColors.navyDark,
+                                              ),
+                                            ),
+                                            SizedBox(width: 2),
+                                            Icon(
+                                              Icons.arrow_forward_ios,
+                                              size: 10,
+                                              color: AppColors.navyDark,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ],
@@ -368,19 +456,32 @@ class _SupplierIncomingOrdersScreenState
                                     code: code,
                                     restaurantName: restaurantName,
                                     supplierName: 'Mi Distribuidora',
-                                    supplierPhone: order['restaurant_phone'] ?? '',
-                                    items: items.map((i) => OrderItem(
-                                      productName: i['product_name']?.toString() ?? 'Producto',
-                                      quantity: (i['quantity'] as num?)?.toInt() ?? 1,
-                                      unitPrice: (i['unit_price'] as num?)?.toDouble() ?? 0.0,
-                                    )).toList(),
+                                    supplierPhone:
+                                        order['restaurant_phone'] ?? '',
+                                    items: items
+                                        .map((i) => OrderItem(
+                                              productName:
+                                                  i['product_name']?.toString() ??
+                                                      'Producto',
+                                              quantity: (i['quantity'] as num?)
+                                                      ?.toInt() ??
+                                                  1,
+                                              unitPrice: (i['unit_price']
+                                                          as num?)
+                                                      ?.toDouble() ??
+                                                  0.0,
+                                            ))
+                                        .toList(),
                                     totalAmount: totalAmount,
                                     status: _parseToOrderStatus(status),
                                     deliveryDate: order['delivery_date'] != null
-                                        ? DateTime.tryParse(order['delivery_date'].toString()) ?? DateTime.now()
+                                        ? DateTime.tryParse(order['delivery_date']
+                                                .toString()) ??
+                                            DateTime.now()
                                         : DateTime.now(),
                                     isFinanced: order['is_financed'] ?? false,
-                                    installmentsCount: order['installments_count'] ?? 1,
+                                    installmentsCount:
+                                        order['installments_count'] ?? 1,
                                   );
 
                                   Navigator.push(
@@ -444,6 +545,31 @@ class _SupplierIncomingOrdersScreenState
                           ),
                         ],
                       ),
+                      if (status.toLowerCase() == 'entregado') ...[
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.amber.shade900,
+                              side: BorderSide(color: Colors.amber.shade600),
+                            ),
+                            icon: const Icon(Icons.star_rate, size: 18),
+                            label: const Text('Calificar Restaurante'),
+                            onPressed: () {
+                              showDialog(
+                                context: context,
+                                builder: (ctx) => ReviewDialog(
+                                  targetId: restaurantId, // El ID de perfil del restaurante
+                                  targetName: restaurantName,
+                                  targetRole: 'restaurant',
+                                  orderId: orderId, // El id de la orden
+                                ),
+                              ).then((_) => _refresh());
+                            }
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),

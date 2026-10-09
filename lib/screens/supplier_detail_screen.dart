@@ -5,6 +5,7 @@ import '../models/supplier.dart';
 import '../theme/app_theme.dart';
 import '../config/session_manager.dart';
 import '../utils/error_handler.dart';
+import '../widgets/business_info_sheet.dart';
 
 class SupplierDetailScreen extends StatefulWidget {
   final Supplier supplier;
@@ -17,13 +18,25 @@ class SupplierDetailScreen extends StatefulWidget {
 
 class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
   late Future<List<Product>> _productsFuture;
+  List<Product> _allProducts = [];
+  List<Product> _filteredProducts = [];
   final Map<String, int> _selectedQuantities = {};
   bool _isSubmitting = false;
+
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _selectedCategory = 'Todos';
+  List<String> _supplierCategories = ['Todos'];
 
   @override
   void initState() {
     super.initState();
     _productsFuture = _fetchProducts();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
   }
 
   Future<List<Product>> _fetchProducts() async {
@@ -34,21 +47,51 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
         .eq('is_available', true)
         .order('name', ascending: true);
 
-    return (response as List<dynamic>)
+    final list = (response as List<dynamic>)
         .map((p) => Product.fromMap(p as Map<String, dynamic>))
         .toList();
+
+    _allProducts = list;
+    _filteredProducts = list;
+
+    final cats = {'Todos', ...list.map((p) => p.category).where((c) => c.isNotEmpty)};
+    _supplierCategories = cats.toList();
+
+    return list;
   }
 
-  double _calculateTotal(List<Product> products) {
+  void _applyFilters() {
+    final query = _searchCtrl.text.toLowerCase().trim();
+    setState(() {
+      _filteredProducts = _allProducts.where((p) {
+        final matchesQuery = p.name.toLowerCase().contains(query) ||
+            p.category.toLowerCase().contains(query);
+        final matchesCat = _selectedCategory == 'Todos' ||
+            p.category.toLowerCase() == _selectedCategory.toLowerCase();
+        return matchesQuery && matchesCat;
+      }).toList();
+    });
+  }
+
+  double _calculateTotal() {
     double total = 0.0;
-    for (var product in products) {
+    for (var product in _allProducts) {
       final qty = _selectedQuantities[product.id] ?? 0;
       total += qty * product.price;
     }
     return total;
   }
 
-  Future<void> _submitOrder(List<Product> products, double total) async {
+  void _openBusinessInfo() {
+    BusinessInfoSheet.show(
+      context,
+      businessId: widget.supplier.id,
+      defaultName: widget.supplier.name,
+      role: 'supplier',
+    );
+  }
+
+  Future<void> _submitOrder(double total) async {
     setState(() => _isSubmitting = true);
     try {
       final restaurantId =
@@ -56,22 +99,42 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
       final orderCode =
           'ORD-${DateTime.now().year}-${Random().nextInt(900) + 100}';
 
-      // 1. Guardar orden general
-      final orderInsert = await supabase.from('orders').insert({
-        'code': orderCode,
-        'restaurant_id': restaurantId,
-        'supplier_id': widget.supplier.id,
-        'total_amount': total,
-        'status': 'pendiente',
-        'is_financed': false,
-        'installments_count': 1,
-      }).select('id').single();
+      final initialHistory = [
+        {
+          'status': 'pendiente',
+          'changed_at': DateTime.now().toIso8601String(),
+          'note': 'Pedido emitido por el restaurante',
+        }
+      ];
+
+      Map<String, dynamic> orderInsert;
+      try {
+        orderInsert = await supabase.from('orders').insert({
+          'code': orderCode,
+          'restaurant_id': restaurantId,
+          'supplier_id': widget.supplier.id,
+          'total_amount': total,
+          'status': 'pendiente',
+          'status_history': initialHistory,
+          'is_financed': false,
+          'installments_count': 1,
+        }).select('id').single();
+      } catch (_) {
+        orderInsert = await supabase.from('orders').insert({
+          'code': orderCode,
+          'restaurant_id': restaurantId,
+          'supplier_id': widget.supplier.id,
+          'total_amount': total,
+          'status': 'pendiente',
+          'is_financed': false,
+          'installments_count': 1,
+        }).select('id').single();
+      }
 
       final orderId = orderInsert['id'];
 
-      // 2. Guardar renglones de producto
       final itemsToInsert = <Map<String, dynamic>>[];
-      for (var product in products) {
+      for (var product in _allProducts) {
         final qty = _selectedQuantities[product.id] ?? 0;
         if (qty > 0) {
           itemsToInsert.add({
@@ -88,7 +151,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('¡Pedido $orderCode despachado con éxito!'),
+            content: Text('¡Pedido $orderCode emitido como Pendiente!'),
             backgroundColor: AppColors.tealMint,
             behavior: SnackBarBehavior.floating,
           ),
@@ -109,6 +172,137 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
+  }
+
+  Widget _buildSupplierHeader() {
+    final s = widget.supplier;
+    return Material(
+      color: Colors.white,
+      child: InkWell(
+        onTap: _openBusinessInfo,
+        splashColor: AppColors.primaryBlue.withOpacity(0.08),
+        highlightColor: AppColors.primaryBlue.withOpacity(0.04),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  CircleAvatar(
+                    radius: 32,
+                    backgroundColor: AppColors.primaryBlue.withOpacity(0.12),
+                    backgroundImage: (s.avatarUrl != null && s.avatarUrl!.isNotEmpty)
+                        ? NetworkImage(s.avatarUrl!)
+                        : null,
+                    child: (s.avatarUrl == null || s.avatarUrl!.isEmpty)
+                        ? Text(
+                            s.name.isNotEmpty ? s.name[0].toUpperCase() : 'D',
+                            style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.primaryBlue,
+                            ),
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                s.name,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.navyDark,
+                                ),
+                              ),
+                            ),
+                            if (s.isVerified) ...[
+                              const SizedBox(width: 6),
+                              const Icon(Icons.check_circle,
+                                  color: AppColors.tealMint, size: 18),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          s.category,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AppColors.subtitleGrey,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(Icons.star, color: Colors.amber, size: 16),
+                            const SizedBox(width: 4),
+                            Text(
+                              '${s.rating.toStringAsFixed(1)} (${s.reviewsCount} reseñas verificadas)',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.chevron_right, size: 16, color: AppColors.subtitleGrey),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Divider(height: 1),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  const Icon(Icons.location_on_outlined,
+                      size: 15, color: AppColors.primaryBlue),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      s.location,
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Icon(Icons.schedule_outlined,
+                      size: 15, color: AppColors.subtitleGrey),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      s.businessHours,
+                      style: const TextStyle(
+                          fontSize: 12, color: AppColors.subtitleGrey),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildProductThumbnail(String? imageUrl) {
@@ -145,9 +339,18 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final currentTotal = _calculateTotal();
+
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.supplier.name),
+        actions: [
+          IconButton(
+            tooltip: 'Ver información y reseñas',
+            icon: const Icon(Icons.info_outline),
+            onPressed: _openBusinessInfo,
+          ),
+        ],
       ),
       body: FutureBuilder<List<Product>>(
         future: _productsFuture,
@@ -167,105 +370,75 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
             );
           }
 
-          final products = snapshot.data ?? [];
-          final currentTotal = _calculateTotal(products);
-
           return Column(
             children: [
-              // Encabezado del Proveedor
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          widget.supplier.category,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                            color: AppColors.navyDark,
-                          ),
-                        ),
-                        Row(
-                          children: [
-                            const Icon(Icons.star, color: Colors.amber, size: 18),
-                            Text(
-                              ' ${widget.supplier.rating.toStringAsFixed(1)} (${widget.supplier.reviewsCount} reseñas)',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+              _buildSupplierHeader(),
+
+              // Buscador de productos
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+                child: TextField(
+                  controller: _searchCtrl,
+                  onChanged: (_) => _applyFilters(),
+                  decoration: InputDecoration(
+                    hintText: 'Buscar insumo en ${widget.supplier.name}...',
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        const Icon(Icons.location_on_outlined,
-                            size: 16, color: AppColors.subtitleGrey),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            'Cobertura: ${widget.supplier.location}',
-                            style: const TextStyle(
-                                fontSize: 13, color: AppColors.subtitleGrey),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        const Icon(Icons.calendar_today_outlined,
-                            size: 16, color: AppColors.subtitleGrey),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            'Despacho: ${widget.supplier.deliveryDays}',
-                            style: const TextStyle(
-                                fontSize: 13, color: AppColors.subtitleGrey),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+                  ),
                 ),
               ),
 
-              // Lista de Insumos con Foto
+              // Chips de categorías
+              if (_supplierCategories.length > 2)
+                SizedBox(
+                  height: 44,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    itemCount: _supplierCategories.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 6),
+                    itemBuilder: (context, idx) {
+                      final cat = _supplierCategories[idx];
+                      final isSelected = _selectedCategory == cat;
+                      return ChoiceChip(
+                        label: Text(cat),
+                        selected: isSelected,
+                        selectedColor: AppColors.primaryBlue,
+                        labelStyle: TextStyle(
+                          color: isSelected ? Colors.white : AppColors.navyDark,
+                          fontSize: 12,
+                        ),
+                        onSelected: (val) {
+                          if (val) {
+                            setState(() => _selectedCategory = cat);
+                            _applyFilters();
+                          }
+                        },
+                      );
+                    },
+                  ),
+                ),
+
+              const SizedBox(height: 6),
+
               Expanded(
-                child: products.isEmpty
+                child: _filteredProducts.isEmpty
                     ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.inventory_2_outlined,
-                                size: 54, color: Colors.grey.shade400),
-                            const SizedBox(height: 10),
-                            const Text(
-                              'Este proveedor aún no tiene insumos disponibles.',
-                              style: TextStyle(color: AppColors.subtitleGrey),
-                            ),
-                          ],
+                        child: Text(
+                          'No se encontraron insumos con esos filtros.',
+                          style: TextStyle(color: Colors.grey.shade600),
                         ),
                       )
                     : ListView.separated(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 12),
-                        itemCount: products.length,
+                            horizontal: 14, vertical: 8),
+                        itemCount: _filteredProducts.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 10),
                         itemBuilder: (context, index) {
-                          final product = products[index];
+                          final product = _filteredProducts[index];
                           final qty = _selectedQuantities[product.id] ?? 0;
 
                           return Container(
@@ -277,11 +450,8 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                             padding: const EdgeInsets.all(10),
                             child: Row(
                               children: [
-                                // Fotografía del Insumo
                                 _buildProductThumbnail(product.imageUrl),
                                 const SizedBox(width: 12),
-
-                                // Detalles (Nombre, Precio, Categoría)
                                 Expanded(
                                   child: Column(
                                     crossAxisAlignment:
@@ -315,8 +485,6 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                                     ],
                                   ),
                                 ),
-
-                                // Selector de Cantidad
                                 Container(
                                   decoration: BoxDecoration(
                                     color: Colors.grey.shade50,
@@ -374,7 +542,6 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                       ),
               ),
 
-              // Barra Inferior de Confirmación de Pedido
               if (currentTotal > 0)
                 Container(
                   padding:
@@ -424,7 +591,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                           ),
                           onPressed: _isSubmitting
                               ? null
-                              : () => _submitOrder(products, currentTotal),
+                              : () => _submitOrder(currentTotal),
                           icon: _isSubmitting
                               ? const SizedBox(
                                   width: 18,
