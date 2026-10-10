@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../main.dart';
 import '../../theme/app_theme.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../config/session_manager.dart';
+
+enum SupplierTimePeriod { thisWeek, thisMonth, last3Months, allTime }
 
 class SupplierCrmScreen extends StatefulWidget {
   const SupplierCrmScreen({super.key});
@@ -11,351 +14,512 @@ class SupplierCrmScreen extends StatefulWidget {
 }
 
 class _SupplierCrmScreenState extends State<SupplierCrmScreen> {
-  RealtimeChannel? _crmSubscription;
-
+  RealtimeChannel? _realtimeSubscription;
+  SupplierTimePeriod _selectedPeriod = SupplierTimePeriod.thisMonth;
   bool _isLoading = true;
+
   double _totalRevenue = 0.0;
-  int _totalOrders = 0;
-  List<MapEntry<String, double>> _topProducts = [];
-  List<MapEntry<String, List<num>>> _topClientsByOrders = [];
+  int _ordersCount = 0;
+  double _averageTicket = 0.0;
+  String _topClientName = 'N/A';
+  double _topClientShare = 0.0;
+
+  List<Map<String, dynamic>> _topProducts = [];
+  List<Map<String, dynamic>> _topClients = [];
+
+  String get _currentUserId =>
+      supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
 
   @override
   void initState() {
     super.initState();
-    _loadAnalytics();
+    _fetchSupplierCrmData();
     _setupRealtime();
   }
 
+  @override
+  void dispose() {
+    _realtimeSubscription?.unsubscribe();
+    super.dispose();
+  }
+
   void _setupRealtime() {
-    _crmSubscription = supabase
-        .channel('public:crm_realtime_channel')
+    _realtimeSubscription = supabase
+        .channel('public:supplier_crm_orders_channel')
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
           schema: 'public',
           table: 'orders',
-          callback: (payload) {
-            if (mounted) {
-              setState(() {});
-            }
+          callback: (_) {
+            if (mounted) _fetchSupplierCrmData();
           },
         )
         .subscribe();
   }
 
-  @override
-  void dispose() {
-    _crmSubscription?.unsubscribe();
-    super.dispose();
+  DateTime? _getPeriodStartDate() {
+    final now = DateTime.now();
+    switch (_selectedPeriod) {
+      case SupplierTimePeriod.thisWeek:
+        final daysToSubtract = now.weekday - 1;
+        final monday = DateTime(now.year, now.month, now.day)
+            .subtract(Duration(days: daysToSubtract));
+        return monday;
+      case SupplierTimePeriod.thisMonth:
+        return DateTime(now.year, now.month, 1);
+      case SupplierTimePeriod.last3Months:
+        return DateTime(now.year, now.month - 2, 1);
+      case SupplierTimePeriod.allTime:
+        return null;
+    }
   }
 
-  Future<void> _loadAnalytics() async {
+  Future<void> _fetchSupplierCrmData() async {
     setState(() => _isLoading = true);
+
     try {
-      final currentUid = supabase.auth.currentUser?.id;
+      final startDate = _getPeriodStartDate();
+      var query = supabase
+          .from('orders')
+          .select('''
+            id,
+            total_amount,
+            restaurant_id,
+            status,
+            created_at,
+            order_items (
+              product_name,
+              quantity,
+              unit_price
+            )
+          ''')
+          .eq('supplier_id', _currentUserId)
+          .neq('status', 'cancelado');
 
-      // 1. Obtener nombres de clientes/restaurantes desde profiles
-      final Map<String, String> restaurantNames = {};
-      try {
-        final profilesRes = await supabase.from('profiles').select('*');
-        for (var p in profilesRes) {
-          final dynamic rawName = p['business_name'] ??
-              p['company_name'] ??
-              p['store_name'] ??
-              p['trade_name'] ??
-              p['name'] ??
-              p['full_name'];
-
-          if (rawName != null && rawName.toString().trim().isNotEmpty) {
-            restaurantNames[p['id'].toString()] = rawName.toString().trim();
-          }
-        }
-      } catch (e) {
-        debugPrint("Error mapeando perfiles: $e");
+      if (startDate != null) {
+        query = query.gte('created_at', startDate.toIso8601String());
       }
 
-      // 2. Consultar las órdenes asignadas a este distribuidor
-      var query = supabase.from('orders').select('*');
-      List<Map<String, dynamic>> orders = [];
-
-      try {
-        final res = (currentUid != null)
-            ? await query.eq('supplier_id', currentUid).order('created_at', ascending: false)
-            : await query.order('created_at', ascending: false);
-        orders = List<Map<String, dynamic>>.from(res);
-      } catch (_) {
-        final resAll = await supabase.from('orders').select('*').order('created_at', ascending: false);
-        orders = List<Map<String, dynamic>>.from(resAll);
-      }
-
-      // Si por sesiones de prueba el UID no coincide directamente, agrupar por el supplier_id principal
-      if (orders.isEmpty) {
-        final resAll = await supabase.from('orders').select('*').order('created_at', ascending: false);
-        final allOrders = List<Map<String, dynamic>>.from(resAll);
-        final Map<String, List<Map<String, dynamic>>> bySupplier = {};
-        for (var o in allOrders) {
-          final sId = o['supplier_id']?.toString() ?? '';
-          bySupplier.putIfAbsent(sId, () => []).add(o);
-        }
-        if (bySupplier.isNotEmpty) {
-          orders = bySupplier.values.reduce((a, b) => a.length > b.length ? a : b);
-        }
-      }
-
-      final myOrderIds = orders.map((o) => o['id'].toString()).toSet();
-
-      // 3. Obtener los insumos reales de estas órdenes desde order_items
-      List<Map<String, dynamic>> orderItems = [];
-      try {
-        final itemsRes = await supabase
-            .from('order_items')
-            .select('*, products(name)')
-            .filter('order_id', 'in', myOrderIds.toList());
-        orderItems = List<Map<String, dynamic>>.from(itemsRes);
-      } catch (e) {
-        debugPrint("Error obteniendo order_items en CRM Distribuidor: $e");
-      }
+      final res = await query.order('created_at', ascending: false);
+      final orders = List<Map<String, dynamic>>.from(res);
 
       double revenue = 0.0;
-      final Map<String, double> productSales = {};
-      final Map<String, List<num>> clientStats = {};
+      final productMap = <String, double>{};
+      final clientStatsMap = <String, Map<String, dynamic>>{};
 
-      // 4. Calcular facturación y clientes
       for (var o in orders) {
-        final double total = (o['total_amount'] as num?)?.toDouble() ??
-            (o['total'] as num?)?.toDouble() ??
-            0.0;
+        final total = (o['total_amount'] as num?)?.toDouble() ?? 0.0;
         revenue += total;
 
-        final restId = o['restaurant_id']?.toString() ?? '';
-        String client = '';
-
-        if (restaurantNames.containsKey(restId)) {
-          client = restaurantNames[restId]!;
-        } else if (o['restaurant_name'] != null && o['restaurant_name'].toString().trim().isNotEmpty) {
-          client = o['restaurant_name'].toString().trim();
-        } else if (o['business_name'] != null && o['business_name'].toString().trim().isNotEmpty) {
-          client = o['business_name'].toString().trim();
-        } else {
-          client = restId.isNotEmpty
-              ? 'Restaurante ${restId.length > 8 ? restId.substring(0, 8) : restId}'
-              : 'Restaurante';
+        final rId = o['restaurant_id']?.toString() ?? 'Desconocido';
+        if (!clientStatsMap.containsKey(rId)) {
+          clientStatsMap[rId] = {'count': 0, 'total': 0.0};
         }
+        clientStatsMap[rId]!['count'] = (clientStatsMap[rId]!['count'] as int) + 1;
+        clientStatsMap[rId]!['total'] = (clientStatsMap[rId]!['total'] as double) + total;
 
-        if (!clientStats.containsKey(client)) {
-          clientStats[client] = [0, 0.0];
+        final items = (o['order_items'] as List<dynamic>?) ?? [];
+        for (var it in items) {
+          final pName = (it['product_name'] ?? 'Insumo').toString();
+          final qty = (it['quantity'] as num?)?.toDouble() ?? 1.0;
+          final price = (it['unit_price'] as num?)?.toDouble() ?? 0.0;
+          final subtotal = qty * price;
+          productMap[pName] = (productMap[pName] ?? 0.0) + subtotal;
         }
-        clientStats[client]![0] = (clientStats[client]![0] as int) + 1;
-        clientStats[client]![1] = (clientStats[client]![1] as double) + total;
       }
 
-      // 5. Acumular las ventas exactas por insumo desde la BD
-      for (var it in orderItems) {
-        String prodName = 'Insumo';
-        if (it['products'] != null && it['products']['name'] != null) {
-          prodName = it['products']['name'].toString();
-        } else if (it['product_name'] != null) {
-          prodName = it['product_name'].toString();
-        } else if (it['name'] != null) {
-          prodName = it['name'].toString();
-        }
+      // Obtener nombres reales de los restaurantes
+      final clientIds = clientStatsMap.keys.where((id) => id != 'Desconocido').toList();
+      final clientNames = <String, String>{};
 
-        final double subtotal = (it['subtotal'] as num?)?.toDouble() ??
-            ((it['unit_price'] as num? ?? 0.0) * (it['quantity'] as num? ?? 1)).toDouble();
+      if (clientIds.isNotEmpty) {
+        try {
+          final profs = await supabase
+              .from('profiles')
+              .select('id, business_name')
+              .filter('id', 'in', clientIds);
 
-        productSales[prodName] = (productSales[prodName] ?? 0.0) + subtotal;
+          for (var p in (profs as List<dynamic>)) {
+            clientNames[p['id'].toString()] =
+                p['business_name']?.toString() ?? 'Restaurante';
+          }
+        } catch (_) {}
       }
 
-      final sortedProducts = productSales.entries.toList()
+      // Ordenar productos por facturación
+      final sortedProducts = productMap.entries.toList()
         ..sort((a, b) => b.value.compareTo(a.value));
-      final sortedClients = clientStats.entries.toList()
-        ..sort((a, b) => (b.value[0]).compareTo(a.value[0]));
+
+      // Ordenar clientes por monto total comprado
+      final sortedClients = clientStatsMap.entries.toList()
+        ..sort((a, b) => (b.value['total'] as double).compareTo(a.value['total'] as double));
+
+      String topClient = 'N/A';
+      double topShare = 0.0;
+      if (sortedClients.isNotEmpty && revenue > 0) {
+        final topEntry = sortedClients.first;
+        topClient = clientNames[topEntry.key] ?? 'Restaurante';
+        topShare = ((topEntry.value['total'] as double) / revenue) * 100;
+      }
 
       if (mounted) {
         setState(() {
-          _totalOrders = orders.length;
           _totalRevenue = revenue;
-          _topProducts = sortedProducts;
-          _topClientsByOrders = sortedClients;
+          _ordersCount = orders.length;
+          _averageTicket = orders.isNotEmpty ? (revenue / orders.length) : 0.0;
+          _topClientName = topClient;
+          _topClientShare = topShare;
+
+          _topProducts = sortedProducts.map((e) => {
+            'name': e.key,
+            'amount': e.value,
+          }).toList();
+
+          _topClients = sortedClients.map((e) => {
+            'id': e.key,
+            'name': clientNames[e.key] ?? 'Restaurante',
+            'orders_count': e.value['count'],
+            'amount': e.value['total'],
+          }).toList();
+
           _isLoading = false;
         });
       }
     } catch (e) {
-      debugPrint("Error calculando analítica de Distribuidor: $e");
+      debugPrint("Error calculando analítica distribuidor: $e");
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('CRM & Rendimiento', style: TextStyle(fontWeight: FontWeight.bold)),
-        actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadAnalytics),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _MetricCard(
-                          title: 'Facturación Total',
-                          value: '\$${_totalRevenue.toStringAsFixed(2)}',
-                          icon: Icons.payments_outlined,
-                          color: AppColors.tealMint,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _MetricCard(
-                          title: 'Despachos Realizados',
-                          value: '$_totalOrders',
-                          icon: Icons.local_shipping_outlined,
-                          color: AppColors.primaryBlue,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-
-                  const Text(
-                    'Insumos Más Vendidos',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 12),
-                  if (_topProducts.isEmpty)
-                    const Text('Aún no hay insumos registrados en órdenes.', style: TextStyle(color: AppColors.subtitleGrey))
-                  else
-                    ..._topProducts.map((entry) {
-                      final maxVal = _topProducts.first.value > 0 ? _topProducts.first.value : 1.0;
-                      final percent = (entry.value / maxVal).clamp(0.0, 1.0);
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(entry.key, style: const TextStyle(fontWeight: FontWeight.w600)),
-                                Text('\$${entry.value.toStringAsFixed(2)}',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.primaryBlue)),
-                              ],
-                            ),
-                            const SizedBox(height: 6),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
-                              child: LinearProgressIndicator(
-                                value: percent,
-                                minHeight: 10,
-                                backgroundColor: Colors.grey.shade200,
-                                color: AppColors.primaryBlue,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
-
-                  const SizedBox(height: 24),
-
-                  const Text(
-                    'Top Restaurantes por Frecuencia de Pedidos',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 12),
-                  if (_topClientsByOrders.isEmpty)
-                    const Text('Aún no hay clientes registrados.', style: TextStyle(color: AppColors.subtitleGrey))
-                  else
-                    ..._topClientsByOrders.map((entry) {
-                      final int orderCount = entry.value[0].toInt();
-                      final double totalSpent = entry.value[1].toDouble();
-                      final int maxOrders = _topClientsByOrders.first.value[0].toInt();
-                      final percent = maxOrders > 0 ? (orderCount / maxOrders).clamp(0.0, 1.0) : 1.0;
-
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 14),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
-                                  children: [
-                                    const Icon(Icons.storefront, size: 18, color: AppColors.tealMint),
-                                    const SizedBox(width: 8),
-                                    Text(entry.key, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                                  ],
-                                ),
-                                Text(
-                                  '$orderCount pedidos (\$${totalSpent.toStringAsFixed(2)})',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.tealMint),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 6),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
-                              child: LinearProgressIndicator(
-                                value: percent,
-                                minHeight: 10,
-                                backgroundColor: Colors.grey.shade200,
-                                color: AppColors.tealMint,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
-                ],
-              ),
-            ),
-    );
-  }
-}
-
-class _MetricCard extends StatelessWidget {
-  final String title;
-  final String value;
-  final IconData icon;
-  final Color color;
-
-  const _MetricCard({
-    required this.title,
-    required this.value,
-    required this.icon,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildKpiCard({
+    required String title,
+    required String value,
+    required IconData icon,
+    required Color iconColor,
+    String? subtitle,
+  }) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.subtitleGrey,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: iconColor.withOpacity(0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, size: 18, color: iconColor),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: AppColors.navyDark,
+            ),
+          ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.grey.shade600,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBarsSection({
+    required String title,
+    required List<Map<String, dynamic>> items,
+    required Color barColor,
+    required IconData itemIcon,
+    bool isClient = false,
+  }) {
+    final maxAmount = items.isNotEmpty ? (items.first['amount'] as double) : 1.0;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.grey.shade200),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CircleAvatar(
-            backgroundColor: color.withOpacity(0.12),
-            radius: 18,
-            child: Icon(icon, size: 20, color: color),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: AppColors.navyDark,
+            ),
           ),
-          const SizedBox(height: 12),
-          Text(title, style: const TextStyle(fontSize: 12, color: AppColors.subtitleGrey)),
-          const SizedBox(height: 4),
-          Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          if (items.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Text(
+                  'No hay registros para este periodo.',
+                  style: TextStyle(color: AppColors.subtitleGrey, fontSize: 13),
+                ),
+              ),
+            )
+          else
+            ...items.map((it) {
+              final name = it['name'] ?? '';
+              final amount = it['amount'] as double;
+              final ordersCount = it['orders_count'];
+              final progress = maxAmount > 0 ? (amount / maxAmount).clamp(0.0, 1.0) : 0.0;
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(itemIcon, size: 14, color: barColor),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            name,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.navyDark,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Text(
+                          isClient && ordersCount != null
+                              ? '$ordersCount pedidos (\$${amount.toStringAsFixed(2)})'
+                              : '\$${amount.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: barColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        minHeight: 7,
+                        backgroundColor: Colors.grey.shade100,
+                        valueColor: AlwaysStoppedAnimation<Color>(barColor),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
         ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        title: const Text('CRM & Rendimiento'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _fetchSupplierCrmData,
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1100),
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : RefreshIndicator(
+                    onRefresh: _fetchSupplierCrmData,
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // 1. Selector de Periodos
+                          Center(
+                            child: SegmentedButton<SupplierTimePeriod>(
+                              showSelectedIcon: false,
+                              segments: const [
+                                ButtonSegment(
+                                  value: SupplierTimePeriod.thisWeek,
+                                  label: Text('Semana'),
+                                ),
+                                ButtonSegment(
+                                  value: SupplierTimePeriod.thisMonth,
+                                  label: Text('Este Mes'),
+                                ),
+                                ButtonSegment(
+                                  value: SupplierTimePeriod.last3Months,
+                                  label: Text('3 Meses'),
+                                ),
+                                ButtonSegment(
+                                  value: SupplierTimePeriod.allTime,
+                                  label: Text('Histórico'),
+                                ),
+                              ],
+                              selected: {_selectedPeriod},
+                              onSelectionChanged: (val) {
+                                setState(() {
+                                  _selectedPeriod = val.first;
+                                });
+                                _fetchSupplierCrmData();
+                              },
+                              style: SegmentedButton.styleFrom(
+                                selectedBackgroundColor: AppColors.primaryBlue,
+                                selectedForegroundColor: Colors.white,
+                                backgroundColor: Colors.white,
+                                foregroundColor: const Color(0xFF475569),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+
+                          // 2. Tarjetas de Métricas (KPIs para Distribuidor)
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              final isDesktop = constraints.maxWidth >= 750;
+                              return GridView.count(
+                                crossAxisCount: isDesktop ? 4 : 2,
+                                crossAxisSpacing: 12,
+                                mainAxisSpacing: 12,
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                childAspectRatio: isDesktop ? 1.4 : 1.3,
+                                children: [
+                                  _buildKpiCard(
+                                    title: 'Facturación Total',
+                                    value: '\$${_totalRevenue.toStringAsFixed(2)}',
+                                    icon: Icons.payments_outlined,
+                                    iconColor: const Color(0xFF26A69A),
+                                  ),
+                                  _buildKpiCard(
+                                    title: 'Despachos Realizados',
+                                    value: '$_ordersCount',
+                                    icon: Icons.local_shipping_outlined,
+                                    iconColor: AppColors.primaryBlue,
+                                  ),
+                                  _buildKpiCard(
+                                    title: 'Ticket Promedio Venta',
+                                    value: '\$${_averageTicket.toStringAsFixed(2)}',
+                                    icon: Icons.analytics_outlined,
+                                    iconColor: Colors.purple,
+                                    subtitle: 'Por cada despacho',
+                                  ),
+                                  _buildKpiCard(
+                                    title: 'Cliente Principal',
+                                    value: _topClientName,
+                                    icon: Icons.storefront_outlined,
+                                    iconColor: Colors.orange.shade800,
+                                    subtitle: _topClientShare > 0
+                                        ? '${_topClientShare.toStringAsFixed(0)}% de tus ingresos'
+                                        : null,
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 24),
+
+                          // 3. Dos Columnas en Computadora / Vertical en Celular
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              final isDesktop = constraints.maxWidth >= 850;
+
+                              final productsWidget = _buildBarsSection(
+                                title: 'Insumos Más Vendidos',
+                                items: _topProducts,
+                                barColor: AppColors.primaryBlue,
+                                itemIcon: Icons.inventory_2_outlined,
+                              );
+
+                              final clientsWidget = _buildBarsSection(
+                                title: 'Top Restaurantes (Frecuencia y Monto)',
+                                items: _topClients,
+                                barColor: const Color(0xFF26A69A),
+                                itemIcon: Icons.restaurant_outlined,
+                                isClient: true,
+                              );
+
+                              if (isDesktop) {
+                                return Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(child: productsWidget),
+                                    const SizedBox(width: 20),
+                                    Expanded(child: clientsWidget),
+                                  ],
+                                );
+                              }
+
+                              return Column(
+                                children: [
+                                  productsWidget,
+                                  const SizedBox(height: 20),
+                                  clientsWidget,
+                                ],
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+          ),
+        ),
       ),
     );
   }

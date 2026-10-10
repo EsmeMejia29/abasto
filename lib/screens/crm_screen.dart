@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../main.dart';
 import '../theme/app_theme.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../config/session_manager.dart';
+
+enum TimePeriod { thisWeek, thisMonth, last3Months, allTime }
 
 class CrmScreen extends StatefulWidget {
   const CrmScreen({super.key});
@@ -11,179 +14,168 @@ class CrmScreen extends StatefulWidget {
 }
 
 class _CrmScreenState extends State<CrmScreen> {
-  RealtimeChannel? _crmSubscription;
+  RealtimeChannel? _realtimeSubscription;
+  TimePeriod _selectedPeriod = TimePeriod.thisMonth;
   bool _isLoading = true;
-  double _totalSpent = 0.0;
-  int _totalOrders = 0;
-  List<MapEntry<String, double>> _topSuppliers = [];
-  List<MapEntry<String, double>> _topSupplies = [];
 
- @override
+  double _totalSpent = 0.0;
+  int _ordersCount = 0;
+  double _averageTicket = 0.0;
+  String _topSupplierName = 'N/A';
+  double _topSupplierShare = 0.0;
+
+  List<Map<String, dynamic>> _topProducts = [];
+  List<Map<String, dynamic>> _topSuppliers = [];
+
+  String get _currentUserId =>
+      supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
+
+  @override
   void initState() {
     super.initState();
-    _loadCrmData();
+    _fetchCrmData();
     _setupRealtime();
   }
 
+  @override
+  void dispose() {
+    _realtimeSubscription?.unsubscribe();
+    super.dispose();
+  }
+
   void _setupRealtime() {
-    // Escucha cambios tanto en orders como en order_items
-    _crmSubscription = supabase
-        .channel('public:restaurant_crm_channel')
+    _realtimeSubscription = supabase
+        .channel('public:restaurant_crm_orders_channel')
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
           schema: 'public',
           table: 'orders',
-          callback: (payload) {
-            debugPrint('Cambio en orders detectado por CRM: ${payload.eventType}');
-            if (mounted) {
-              _loadCrmData();
-            }
-          },
-        )
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'order_items',
-          callback: (payload) {
-            debugPrint('Cambio en order_items detectado por CRM: ${payload.eventType}');
-            if (mounted) {
-              _loadCrmData();
-            }
+          callback: (_) {
+            if (mounted) _fetchCrmData();
           },
         )
         .subscribe();
   }
 
-  @override
-  void dispose() {
-    _crmSubscription?.unsubscribe();
-    super.dispose();
+  DateTime? _getPeriodStartDate() {
+    final now = DateTime.now();
+    switch (_selectedPeriod) {
+      case TimePeriod.thisWeek:
+        // Lunes de la semana actual
+        final daysToSubtract = now.weekday - 1;
+        final monday = DateTime(now.year, now.month, now.day).subtract(Duration(days: daysToSubtract));
+        return monday;
+      case TimePeriod.thisMonth:
+        return DateTime(now.year, now.month, 1);
+      case TimePeriod.last3Months:
+        return DateTime(now.year, now.month - 2, 1);
+      case TimePeriod.allTime:
+        return null;
+    }
   }
 
-  Future<void> _loadCrmData() async {
+  Future<void> _fetchCrmData() async {
     setState(() => _isLoading = true);
+
     try {
-      final currentUid = supabase.auth.currentUser?.id;
+      final startDate = _getPeriodStartDate();
+      var query = supabase
+          .from('orders')
+          .select('''
+            id,
+            total_amount,
+            supplier_id,
+            status,
+            created_at,
+            order_items (
+              product_name,
+              quantity,
+              unit_price
+            )
+          ''')
+          .eq('restaurant_id', _currentUserId)
+          .neq('status', 'cancelado');
 
-      // 1. Consultar todos los perfiles de la BD para tener el mapa id -> business_name
-      final Map<String, String> supplierNames = {};
-      try {
-        final profilesRes = await supabase
-            .from('profiles')
-            .select('*');
-
-        for (var p in profilesRes) {
-          // Evalúa las columnas habituales de nombre comercial o personal
-          final dynamic rawName = p['business_name'] ??
-              p['company_name'] ??
-              p['store_name'] ??
-              p['trade_name'] ??
-              p['name'] ??
-              p['full_name'];
-
-          if (rawName != null && rawName.toString().trim().isNotEmpty) {
-            supplierNames[p['id'].toString()] = rawName.toString().trim();
-          }
-        }
-      } catch (e) {
-        debugPrint("Error leyendo profiles: $e");
+      if (startDate != null) {
+        query = query.gte('created_at', startDate.toIso8601String());
       }
 
-      // 2. Traer las órdenes correspondientes al restaurante actual
-      var query = supabase.from('orders').select('*');
-      List<Map<String, dynamic>> orders = [];
-
-      try {
-        final res = (currentUid != null)
-            ? await query.eq('restaurant_id', currentUid).order('created_at', ascending: false)
-            : await query.order('created_at', ascending: false);
-        orders = List<Map<String, dynamic>>.from(res);
-      } catch (_) {
-        final resFallback = await supabase.from('orders').select('*').order('created_at', ascending: false);
-        orders = List<Map<String, dynamic>>.from(resFallback);
-      }
-
-      // Si se probaron órdenes con otro restaurant_id de prueba, tomar las órdenes asociadas al grupo principal
-      if (orders.isEmpty) {
-        final resAll = await supabase.from('orders').select('*').order('created_at', ascending: false);
-        final allOrders = List<Map<String, dynamic>>.from(resAll);
-        final Map<String, List<Map<String, dynamic>>> grouped = {};
-        for (var o in allOrders) {
-          final rId = o['restaurant_id']?.toString() ?? '';
-          grouped.putIfAbsent(rId, () => []).add(o);
-        }
-        if (grouped.isNotEmpty) {
-          orders = grouped.values.reduce((a, b) => a.length > b.length ? a : b);
-        }
-      }
-
-      final myOrderIds = orders.map((o) => o['id'].toString()).toSet();
-
-      // 3. Traer los ítems de estas órdenes directamente desde order_items enlazado con products
-      List<Map<String, dynamic>> orderItems = [];
-      try {
-        final itemsRes = await supabase
-            .from('order_items')
-            .select('*, products(name)')
-            .filter('order_id', 'in', myOrderIds.toList());
-        orderItems = List<Map<String, dynamic>>.from(itemsRes);
-      } catch (e) {
-        debugPrint("Error obteniendo order_items: $e");
-      }
+      final res = await query.order('created_at', ascending: false);
+      final orders = List<Map<String, dynamic>>.from(res);
 
       double spent = 0.0;
-      final Map<String, double> supplierMap = {};
-      final Map<String, double> itemAmountMap = {};
+      final productMap = <String, double>{};
+      final supplierExpenseMap = <String, double>{};
 
-      // 4. Calcular gasto total y agrupar por distribuidor usando la BD
       for (var o in orders) {
-        final double amount = (o['total_amount'] as num?)?.toDouble() ?? 
-                             (o['total'] as num?)?.toDouble() ?? 0.0;
-        spent += amount;
+        final total = (o['total_amount'] as num?)?.toDouble() ?? 0.0;
+        spent += total;
 
-        final sId = o['supplier_id']?.toString() ?? '';
+        final sId = o['supplier_id']?.toString() ?? 'Desconocido';
+        supplierExpenseMap[sId] = (supplierExpenseMap[sId] ?? 0.0) + total;
 
-        String supName = '';
-        if (supplierNames.containsKey(sId)) {
-          supName = supplierNames[sId]!;
-        } else if (o['supplier_name'] != null && o['supplier_name'].toString().trim().isNotEmpty) {
-          supName = o['supplier_name'].toString().trim();
-        } else if (o['supplier_business_name'] != null && o['supplier_business_name'].toString().trim().isNotEmpty) {
-          supName = o['supplier_business_name'].toString().trim();
-        } else {
-          // Si por alguna razón la cuenta no tiene nombre configurado en profiles
-          supName = 'Distribuidor ${sId.length > 8 ? sId.substring(0, 8) : sId}';
+        final items = (o['order_items'] as List<dynamic>?) ?? [];
+        for (var it in items) {
+          final pName = (it['product_name'] ?? 'Insumo').toString();
+          final qty = (it['quantity'] as num?)?.toDouble() ?? 1.0;
+          final price = (it['unit_price'] as num?)?.toDouble() ?? 0.0;
+          final subtotal = qty * price;
+          productMap[pName] = (productMap[pName] ?? 0.0) + subtotal;
         }
-
-        supplierMap[supName] = (supplierMap[supName] ?? 0.0) + amount;
       }
 
-      // 5. Agrupar insumos vendidos con los datos de order_items y products
-      for (var it in orderItems) {
-        String prodName = 'Insumo';
-        if (it['products'] != null && it['products']['name'] != null) {
-          prodName = it['products']['name'].toString();
-        } else if (it['product_name'] != null) {
-          prodName = it['product_name'].toString();
-        }
+      // Obtener nombres de distribuidores
+      final supplierIds = supplierExpenseMap.keys.where((id) => id != 'Desconocido').toList();
+      final supplierNames = <String, String>{};
 
-        final double subtotal = (it['subtotal'] as num?)?.toDouble() ??
-            ((it['unit_price'] as num? ?? 0.0) * (it['quantity'] as num? ?? 1)).toDouble();
+      if (supplierIds.isNotEmpty) {
+        try {
+          final profs = await supabase
+              .from('profiles')
+              .select('id, business_name')
+              .filter('id', 'in', supplierIds);
 
-        itemAmountMap[prodName] = (itemAmountMap[prodName] ?? 0.0) + subtotal;
+          for (var p in (profs as List<dynamic>)) {
+            supplierNames[p['id'].toString()] = p['business_name']?.toString() ?? 'Distribuidor';
+          }
+        } catch (_) {}
       }
 
-      final sortedSuppliers = supplierMap.entries.toList()
+      // Ordenar productos de mayor a menor
+      final sortedProducts = productMap.entries.toList()
         ..sort((a, b) => b.value.compareTo(a.value));
-      final sortedItems = itemAmountMap.entries.toList()
+
+      // Ordenar distribuidores de mayor a menor
+      final sortedSuppliers = supplierExpenseMap.entries.toList()
         ..sort((a, b) => b.value.compareTo(a.value));
+
+      String topSupplier = 'N/A';
+      double topShare = 0.0;
+      if (sortedSuppliers.isNotEmpty && spent > 0) {
+        final topEntry = sortedSuppliers.first;
+        topSupplier = supplierNames[topEntry.key] ?? 'Distribuidor';
+        topShare = (topEntry.value / spent) * 100;
+      }
 
       if (mounted) {
         setState(() {
-          _totalOrders = orders.length;
           _totalSpent = spent;
-          _topSuppliers = sortedSuppliers;
-          _topSupplies = sortedItems;
+          _ordersCount = orders.length;
+          _averageTicket = orders.isNotEmpty ? (spent / orders.length) : 0.0;
+          _topSupplierName = topSupplier;
+          _topSupplierShare = topShare;
+
+          _topProducts = sortedProducts.map((e) => {
+            'name': e.key,
+            'amount': e.value,
+          }).toList();
+
+          _topSuppliers = sortedSuppliers.map((e) => {
+            'id': e.key,
+            'name': supplierNames[e.key] ?? 'Distribuidor',
+            'amount': e.value,
+          }).toList();
+
           _isLoading = false;
         });
       }
@@ -193,200 +185,330 @@ class _CrmScreenState extends State<CrmScreen> {
     }
   }
 
-
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('CRM & Analítica',
-            style: TextStyle(fontWeight: FontWeight.bold)),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadCrmData,
-          ),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Métricas Principales
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _MetricCard(
-                          title: 'Gasto Total',
-                          value: '\$${_totalSpent.toStringAsFixed(2)}',
-                          icon: Icons.account_balance_wallet_outlined,
-                          color: AppColors.tealMint,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _MetricCard(
-                          title: 'Pedidos Hechos',
-                          value: '$_totalOrders',
-                          icon: Icons.receipt_long_outlined,
-                          color: AppColors.primaryBlue,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Insumos Más Pedidos
-                  const Text(
-                    'Insumos Más Pedidos (Monto Invertido)',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 12),
-                  if (_topSupplies.isEmpty)
-                    const Text('No hay compras registradas aún.',
-                        style: TextStyle(color: AppColors.subtitleGrey))
-                  else
-                    ..._topSupplies.map((entry) {
-                      final maxVal = _topSupplies.first.value > 0
-                          ? _topSupplies.first.value
-                          : 1.0;
-                      final percent = (entry.value / maxVal).clamp(0.0, 1.0);
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(entry.key,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w600)),
-                                Text('\$${entry.value.toStringAsFixed(2)}',
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: AppColors.primaryBlue)),
-                              ],
-                            ),
-                            const SizedBox(height: 6),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
-                              child: LinearProgressIndicator(
-                                value: percent,
-                                minHeight: 10,
-                                backgroundColor: Colors.grey.shade200,
-                                color: AppColors.primaryBlue,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
-
-                  const SizedBox(height: 24),
-
-                  // Distribuidores Principales
-                  const Text(
-                    'Distribuidores Principales',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 12),
-                  if (_topSuppliers.isEmpty)
-                    const Text('No hay distribuidores recurrentes aún.',
-                        style: TextStyle(color: AppColors.subtitleGrey))
-                  else
-                    ..._topSuppliers.map((entry) {
-                      final maxVal = _topSuppliers.first.value > 0
-                          ? _topSuppliers.first.value
-                          : 1.0;
-                      final percent = (entry.value / maxVal).clamp(0.0, 1.0);
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
-                                  children: [
-                                    const Icon(Icons.local_shipping_outlined,
-                                        size: 16, color: AppColors.tealMint),
-                                    const SizedBox(width: 6),
-                                    Text(entry.key,
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.w600)),
-                                  ],
-                                ),
-                                Text('\$${entry.value.toStringAsFixed(2)}',
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: AppColors.tealMint)),
-                              ],
-                            ),
-                            const SizedBox(height: 6),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
-                              child: LinearProgressIndicator(
-                                value: percent,
-                                minHeight: 10,
-                                backgroundColor: Colors.grey.shade200,
-                                color: AppColors.tealMint,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
-                ],
-              ),
-            ),
-    );
-  }
-}
-
-class _MetricCard extends StatelessWidget {
-  final String title;
-  final String value;
-  final IconData icon;
-  final Color color;
-
-  const _MetricCard({
-    required this.title,
-    required this.value,
-    required this.icon,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildKpiCard({
+    required String title,
+    required String value,
+    required IconData icon,
+    required Color iconColor,
+    String? subtitle,
+  }) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.subtitleGrey,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: iconColor.withOpacity(0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, size: 18, color: iconColor),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: AppColors.navyDark,
+            ),
+          ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.grey.shade600,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBarsSection({
+    required String title,
+    required List<Map<String, dynamic>> items,
+    required Color barColor,
+    required IconData itemIcon,
+  }) {
+    final maxAmount = items.isNotEmpty ? (items.first['amount'] as double) : 1.0;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.grey.shade200),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CircleAvatar(
-            backgroundColor: color.withOpacity(0.12),
-            radius: 18,
-            child: Icon(icon, size: 20, color: color),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: AppColors.navyDark,
+            ),
           ),
-          const SizedBox(height: 12),
-          Text(title,
-              style: const TextStyle(
-                  fontSize: 12, color: AppColors.subtitleGrey)),
-          const SizedBox(height: 4),
-          Text(value,
-              style:
-                  const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          if (items.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Text(
+                  'No hay registros para este periodo.',
+                  style: TextStyle(color: AppColors.subtitleGrey, fontSize: 13),
+                ),
+              ),
+            )
+          else
+            ...items.map((it) {
+              final name = it['name'] ?? '';
+              final amount = it['amount'] as double;
+              final progress = maxAmount > 0 ? (amount / maxAmount).clamp(0.0, 1.0) : 0.0;
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(itemIcon, size: 14, color: barColor),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            name,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.navyDark,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Text(
+                          '\$${amount.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: barColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        minHeight: 7,
+                        backgroundColor: Colors.grey.shade100,
+                        valueColor: AlwaysStoppedAnimation<Color>(barColor),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
         ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        title: const Text('CRM & Analítica'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _fetchCrmData,
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1100),
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : RefreshIndicator(
+                    onRefresh: _fetchCrmData,
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // 1. Selector de Periodos
+                          Center(
+                            child: SegmentedButton<TimePeriod>(
+                              showSelectedIcon: false,
+                              segments: const [
+                                ButtonSegment(
+                                  value: TimePeriod.thisWeek,
+                                  label: Text('Semana'),
+                                ),
+                                ButtonSegment(
+                                  value: TimePeriod.thisMonth,
+                                  label: Text('Este Mes'),
+                                ),
+                                ButtonSegment(
+                                  value: TimePeriod.last3Months,
+                                  label: Text('3 Meses'),
+                                ),
+                                ButtonSegment(
+                                  value: TimePeriod.allTime,
+                                  label: Text('Histórico'),
+                                ),
+                              ],
+                              selected: {_selectedPeriod},
+                              onSelectionChanged: (val) {
+                                setState(() {
+                                  _selectedPeriod = val.first;
+                                });
+                                _fetchCrmData();
+                              },
+                              style: SegmentedButton.styleFrom(
+                                selectedBackgroundColor: AppColors.primaryBlue,
+                                selectedForegroundColor: Colors.white,
+                                backgroundColor: Colors.white,
+                                foregroundColor: const Color(0xFF475569),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+
+                          // 2. Tarjetas de Métricas (KPIs)
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              final isDesktop = constraints.maxWidth >= 750;
+                              return GridView.count(
+                                crossAxisCount: isDesktop ? 4 : 2,
+                                crossAxisSpacing: 12,
+                                mainAxisSpacing: 12,
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                childAspectRatio: isDesktop ? 1.4 : 1.3,
+                                children: [
+                                  _buildKpiCard(
+                                    title: 'Gasto Total',
+                                    value: '\$${_totalSpent.toStringAsFixed(2)}',
+                                    icon: Icons.account_balance_wallet_outlined,
+                                    iconColor: const Color(0xFF26A69A),
+                                  ),
+                                  _buildKpiCard(
+                                    title: 'Pedidos Hechos',
+                                    value: '$_ordersCount',
+                                    icon: Icons.receipt_long_outlined,
+                                    iconColor: AppColors.primaryBlue,
+                                  ),
+                                  _buildKpiCard(
+                                    title: 'Ticket Promedio',
+                                    value: '\$${_averageTicket.toStringAsFixed(2)}',
+                                    icon: Icons.query_stats_outlined,
+                                    iconColor: Colors.purple,
+                                    subtitle: 'Por cada compra',
+                                  ),
+                                  _buildKpiCard(
+                                    title: 'Mayor Proveedor',
+                                    value: _topSupplierName,
+                                    icon: Icons.local_shipping_outlined,
+                                    iconColor: Colors.orange.shade800,
+                                    subtitle: _topSupplierShare > 0
+                                        ? '${_topSupplierShare.toStringAsFixed(0)}% del presupuesto'
+                                        : null,
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 24),
+
+                          // 3. Gráficos de barras (2 Columnas en desktop, 1 en mobile)
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              final isDesktop = constraints.maxWidth >= 850;
+
+                              final productsWidget = _buildBarsSection(
+                                title: 'Insumos Más Pedidos (Monto)',
+                                items: _topProducts,
+                                barColor: AppColors.primaryBlue,
+                                itemIcon: Icons.shopping_basket_outlined,
+                              );
+
+                              final suppliersWidget = _buildBarsSection(
+                                title: 'Distribuidores Principales',
+                                items: _topSuppliers,
+                                barColor: const Color(0xFF26A69A),
+                                itemIcon: Icons.storefront_outlined,
+                              );
+
+                              if (isDesktop) {
+                                return Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(child: productsWidget),
+                                    const SizedBox(width: 20),
+                                    Expanded(child: suppliersWidget),
+                                  ],
+                                );
+                              }
+
+                              return Column(
+                                children: [
+                                  productsWidget,
+                                  const SizedBox(height: 20),
+                                  suppliersWidget,
+                                ],
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+          ),
+        ),
       ),
     );
   }

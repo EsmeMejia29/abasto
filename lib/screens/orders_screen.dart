@@ -213,6 +213,219 @@ class _OrdersScreenState extends State<OrdersScreen> {
     );
   }
 
+  Widget _buildOrderCard(Map<String, dynamic> order) {
+    final code = order['code'] ?? 'ORD-000';
+    final supplierName = order['supplier_name'] ?? 'PRUEBA';
+    final total = (order['total_amount'] as num?)?.toDouble() ?? 0.0;
+    final status = order['status'] ?? 'pendiente';
+    final items = (order['order_items'] as List<dynamic>?) ?? [];
+
+    return Card(
+      elevation: 1.5,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: Colors.grey.shade200),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      code,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: AppColors.navyDark,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        const Icon(Icons.storefront,
+                            size: 14, color: AppColors.primaryBlue),
+                        const SizedBox(width: 4),
+                        Text(
+                          supplierName,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                InkWell(
+                  onTap: () => _showTimelineDialog(order),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: _getStatusColor(status).withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _formatStatus(status),
+                          style: TextStyle(
+                            color: _getStatusColor(status),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.history,
+                            size: 14,
+                            color: _getStatusColor(status)),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 18),
+            ...items.map((it) {
+              final pName = it['product_name'] ?? 'Insumo';
+              final qty = it['quantity'] ?? 1;
+              final price =
+                  (it['unit_price'] as num?)?.toDouble() ?? 0.0;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('$qty x $pName',
+                        style: const TextStyle(fontSize: 13)),
+                    Text('\$${(qty * price).toStringAsFixed(2)}',
+                        style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500)),
+                  ],
+                ),
+              );
+            }),
+            const Divider(height: 18),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Pago contra entrega',
+                    style: TextStyle(
+                        fontSize: 12, color: AppColors.subtitleGrey)),
+                Text(
+                  'Total: \$${total.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.navyDark,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _showTimelineDialog(order),
+                    icon: const Icon(Icons.access_time, size: 16),
+                    label: const Text('Trazabilidad'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primaryBlue,
+                    ),
+                    onPressed: () {
+                      final orderObj = OrderModel(
+                        id: order['id'].toString(),
+                        code: code,
+                        restaurantName: 'Mi Restaurante',
+                        supplierName: supplierName,
+                        supplierPhone: order['supplier_phone'] ?? '',
+                        items: items
+                            .map((i) => OrderItem(
+                                  productName:
+                                      i['product_name'] ?? '',
+                                  quantity: (i['quantity'] as num?)
+                                          ?.toInt() ??
+                                      1,
+                                  unitPrice: (i['unit_price']
+                                              as num?)
+                                          ?.toDouble() ??
+                                      0.0,
+                                ))
+                            .toList(),
+                        totalAmount: total,
+                        status: status == 'enRuta'
+                            ? OrderStatus.enRuta
+                            : (status == 'entregado'
+                                ? OrderStatus.entregado
+                                : OrderStatus.pendiente),
+                        deliveryDate: DateTime.now(),
+                      );
+
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => OrderChatScreen(
+                            order: orderObj,
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.chat_bubble_outline,
+                        color: Colors.white, size: 16),
+                    label: const Text('Chat',
+                        style: TextStyle(color: Colors.white)),
+                  ),
+                ),
+              ],
+            ),
+            if (status.toLowerCase() == 'entregado') ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.amber.shade900,
+                    side: BorderSide(color: Colors.amber.shade600),
+                  ),
+                  icon: const Icon(Icons.star_outline, size: 18),
+                  label: const Text('Calificar Distribuidor'),
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (ctx) => ReviewDialog(
+                        targetId: order['supplier_id'].toString(),
+                        targetName: supplierName,
+                        targetRole: 'supplier',
+                        orderId: order['id'].toString(),
+                      ),
+                    ).then((updated) {
+                      if (updated == true) _refresh();
+                    });
+                  },
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -254,221 +467,36 @@ class _OrdersScreenState extends State<OrdersScreen> {
             );
           }
 
-          return ListView.separated(
-            padding: const EdgeInsets.all(14),
-            itemCount: orders.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
-            itemBuilder: (context, index) {
-              final order = orders[index];
-              final code = order['code'] ?? 'ORD-000';
-              final supplierName = order['supplier_name'] ?? 'PRUEBA';
-              final total = (order['total_amount'] as num?)?.toDouble() ?? 0.0;
-              final status = order['status'] ?? 'pendiente';
-              final items = (order['order_items'] as List<dynamic>?) ?? [];
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              final isDesktop = constraints.maxWidth >= 800;
 
-              return Card(
-                elevation: 1.5,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  side: BorderSide(color: Colors.grey.shade200),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                code,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                  color: AppColors.navyDark,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Row(
-                                children: [
-                                  const Icon(Icons.storefront,
-                                      size: 14, color: AppColors.primaryBlue),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    supplierName,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                          InkWell(
-                            onTap: () => _showTimelineDialog(order),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 5),
-                              decoration: BoxDecoration(
-                                color:
-                                    _getStatusColor(status).withOpacity(0.12),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    _formatStatus(status),
-                                    style: TextStyle(
-                                      color: _getStatusColor(status),
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Icon(Icons.history,
-                                      size: 14,
-                                      color: _getStatusColor(status)),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
+              // En computadora: Grid de 2 columnas centrado
+              if (isDesktop) {
+                return Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1200),
+                    child: GridView.builder(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        crossAxisSpacing: 18,
+                        mainAxisSpacing: 18,
+                        mainAxisExtent: 270, // Altura rectangular óptima
                       ),
-                      const Divider(height: 20),
-                      ...items.map((it) {
-                        final pName = it['product_name'] ?? 'Insumo';
-                        final qty = it['quantity'] ?? 1;
-                        final price =
-                            (it['unit_price'] as num?)?.toDouble() ?? 0.0;
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 2),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text('$qty x $pName',
-                                  style: const TextStyle(fontSize: 13)),
-                              Text('\$${(qty * price).toStringAsFixed(2)}',
-                                  style: const TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w500)),
-                            ],
-                          ),
-                        );
-                      }),
-                      const Divider(height: 20),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('Pago contra entrega',
-                              style: TextStyle(
-                                  fontSize: 12, color: AppColors.subtitleGrey)),
-                          Text(
-                            'Total: \$${total.toStringAsFixed(2)}',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.navyDark,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () => _showTimelineDialog(order),
-                              icon: const Icon(Icons.access_time, size: 16),
-                              label: const Text('Trazabilidad'),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppColors.primaryBlue,
-                              ),
-                              onPressed: () {
-                                final orderObj = OrderModel(
-                                  id: order['id'].toString(),
-                                  code: code,
-                                  restaurantName: 'Mi Restaurante',
-                                  supplierName: supplierName,
-                                  supplierPhone: order['supplier_phone'] ?? '',
-                                  items: items
-                                      .map((i) => OrderItem(
-                                            productName:
-                                                i['product_name'] ?? '',
-                                            quantity: (i['quantity'] as num?)
-                                                    ?.toInt() ??
-                                                1,
-                                            unitPrice: (i['unit_price']
-                                                        as num?)
-                                                    ?.toDouble() ??
-                                                0.0,
-                                          ))
-                                      .toList(),
-                                  totalAmount: total,
-                                  status: status == 'enRuta'
-                                      ? OrderStatus.enRuta
-                                      : (status == 'entregado'
-                                          ? OrderStatus.entregado
-                                          : OrderStatus.pendiente),
-                                  deliveryDate: DateTime.now(),
-                                );
-
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => OrderChatScreen(
-                                      order: orderObj,
-                                    ),
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.chat_bubble_outline,
-                                  color: Colors.white, size: 16),
-                              label: const Text('Chat',
-                                  style: TextStyle(color: Colors.white)),
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (status.toLowerCase() == 'entregado') ...[
-                        const SizedBox(height: 10),
-                        SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.amber.shade900,
-                              side: BorderSide(color: Colors.amber.shade600),
-                            ),
-                            icon: const Icon(Icons.star_outline, size: 18),
-                            label: const Text('Calificar Distribuidor'),
-                            onPressed: () {
-                              showDialog(
-                                context: context,
-                                builder: (ctx) => ReviewDialog(
-                                  targetId: order['supplier_id'].toString(),
-                                  targetName: supplierName,
-                                  targetRole: 'supplier',
-                                  orderId: order['id'].toString(),
-                                ),
-                              ).then((updated) {
-                                if (updated == true) _refresh();
-                              });
-                            },
-                          ),
-                        ),
-                      ],
-                    ],
+                      itemCount: orders.length,
+                      itemBuilder: (context, index) => _buildOrderCard(orders[index]),
+                    ),
                   ),
-                ),
+                );
+              }
+
+              // En celular: Lista vertical original
+              return ListView.separated(
+                padding: const EdgeInsets.all(14),
+                itemCount: orders.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                itemBuilder: (context, index) => _buildOrderCard(orders[index]),
               );
             },
           );

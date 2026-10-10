@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../main.dart';
-import '../../models/order.dart';
-import '../../theme/app_theme.dart';
+import '../main.dart';
+import '../models/order.dart';
+import '../theme/app_theme.dart';
 
 class OrderChatScreen extends StatefulWidget {
   final Order? order;
@@ -50,7 +50,7 @@ class _OrderChatScreenState extends State<OrderChatScreen> {
     if (widget.order != null) {
       _effectiveOrderId = widget.order!.id;
       _effectiveCode = widget.order!.code;
-      _effectivePartyName = widget.otherPartyName ?? widget.order!.restaurantName ?? 'Pedido ${_effectiveCode}';
+      _effectivePartyName = widget.otherPartyName ?? widget.order!.restaurantName ?? 'Pedido $_effectiveCode';
     } else {
       _effectiveOrderId = widget.orderId ?? '';
       _effectiveCode = widget.orderCode ?? (widget.orderId?.startsWith('ORD-') == true ? widget.orderId! : '');
@@ -86,7 +86,6 @@ class _OrderChatScreenState extends State<OrderChatScreen> {
     setState(() => _isSending = true);
 
     try {
-      // 1. Obtener el nombre del remitente desde profiles si está disponible
       String senderName = 'Usuario';
       try {
         final profile = await supabase
@@ -103,7 +102,6 @@ class _OrderChatScreenState extends State<OrderChatScreen> {
         debugPrint("Nota obteniendo sender_name: $e");
       }
 
-      // 2. Insertar con sender_name incluido
       final payload = {
         'order_id': targetId,
         'sender_id': _currentUserId,
@@ -167,212 +165,221 @@ class _OrderChatScreenState extends State<OrderChatScreen> {
         ),
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            // Banner informativo
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              color: Colors.amber.shade50,
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline, size: 18, color: Colors.orange.shade800),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Canal directo para coordinar horario, factura o cambios del pedido.',
-                      style: TextStyle(fontSize: 12, color: Colors.orange.shade900),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Flujo de mensajes reactivo con StreamBuilder
-            Expanded(
-              child: StreamBuilder<List<Map<String, dynamic>>>(
-                stream: supabase
-                    .from('order_messages')
-                    .stream(primaryKey: ['id'])
-                    .eq('order_id', _effectiveOrderId)
-                    .order('created_at', ascending: true),
-                builder: (context, snapshot) {
-                  if (snapshot.hasError) {
-                    return Center(
-                      child: Text(
-                        'Error al cargar mensajes: ${snapshot.error}',
-                        style: const TextStyle(color: Colors.red),
-                      ),
-                    );
-                  }
-
-                  if (snapshot.connectionState == ConnectionState.waiting &&
-                      !snapshot.hasData) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-
-                  final messages = snapshot.data ?? [];
-
-                  if (messages.isEmpty) {
-                    return Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: const [
-                          Icon(Icons.chat_bubble_outline,
-                              size: 54, color: AppColors.subtitleGrey),
-                          SizedBox(height: 12),
-                          Text(
-                            'No hay mensajes aún.',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.subtitleGrey,
-                            ),
-                          ),
-                          SizedBox(height: 4),
-                          Text(
-                            'Escribe para iniciar la coordinación.',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppColors.subtitleGrey,
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-
-                  WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
-
-                  return ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    itemCount: messages.length,
-                    itemBuilder: (ctx, index) {
-                      final msg = messages[index];
-                      final senderId = msg['sender_id']?.toString() ?? '';
-                      final isMe = senderId == _currentUserId;
-                      final text = msg['message'] ?? msg['content'] ?? '';
-                      final time = _formatTime(msg['created_at']);
-
-                      return Align(
-                        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                        child: Container(
-                          constraints: BoxConstraints(
-                            maxWidth: MediaQuery.of(context).size.width * 0.76,
-                          ),
-                          margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: isMe ? AppColors.primaryBlue : Colors.white,
-                            borderRadius: BorderRadius.only(
-                              topLeft: const Radius.circular(16),
-                              topRight: const Radius.circular(16),
-                              bottomLeft: Radius.circular(isMe ? 16 : 4),
-                              bottomRight: Radius.circular(isMe ? 4 : 16),
-                            ),
-                            border: isMe ? null : Border.all(color: Colors.grey.shade200),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.04),
-                                blurRadius: 3,
-                                offset: const Offset(0, 1),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment:
-                                isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                text,
-                                style: TextStyle(
-                                  color: isMe ? Colors.white : Colors.black87,
-                                  fontSize: 14,
-                                  height: 1.3,
-                                ),
-                              ),
-                              if (time.isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  time,
-                                  style: TextStyle(
-                                    color: isMe
-                                        ? Colors.white.withOpacity(0.7)
-                                        : Colors.grey.shade500,
-                                    fontSize: 10,
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 900),
+            child: Column(
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  color: Colors.amber.shade50,
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 18, color: Colors.orange.shade800),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Canal directo para coordinar horario, factura o cambios del pedido.',
+                          style: TextStyle(fontSize: 12, color: Colors.orange.shade900),
                         ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: StreamBuilder<List<Map<String, dynamic>>>(
+                    stream: supabase
+                        .from('order_messages')
+                        .stream(primaryKey: ['id'])
+                        .eq('order_id', _effectiveOrderId)
+                        .order('created_at', ascending: true),
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return Center(
+                          child: Text(
+                            'Error al cargar mensajes: ${snapshot.error}',
+                            style: const TextStyle(color: Colors.red),
+                          ),
+                        );
+                      }
+
+                      if (snapshot.connectionState == ConnectionState.waiting &&
+                          !snapshot.hasData) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+
+                      final rawMessages = snapshot.data ?? [];
+
+                      // Deduplicación estricta por id para evitar mensajes dobles
+                      final seenIds = <String>{};
+                      final messages = <Map<String, dynamic>>[];
+                      for (var m in rawMessages) {
+                        final id = m['id']?.toString() ?? '';
+                        if (id.isEmpty || !seenIds.contains(id)) {
+                          if (id.isNotEmpty) seenIds.add(id);
+                          messages.add(m);
+                        }
+                      }
+
+                      if (messages.isEmpty) {
+                        return Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: const [
+                              Icon(Icons.chat_bubble_outline,
+                                  size: 54, color: AppColors.subtitleGrey),
+                              SizedBox(height: 12),
+                              Text(
+                                'No hay mensajes aún.',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.subtitleGrey,
+                                ),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'Escribe para iniciar la coordinación.',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: AppColors.subtitleGrey,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+
+                      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+
+                      return ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        itemCount: messages.length,
+                        itemBuilder: (ctx, index) {
+                          final msg = messages[index];
+                          final senderId = msg['sender_id']?.toString() ?? '';
+                          final isMe = senderId == _currentUserId;
+                          final text = msg['message'] ?? msg['content'] ?? '';
+                          final time = _formatTime(msg['created_at']);
+
+                          return Align(
+                            alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                            child: Container(
+                              constraints: const BoxConstraints(maxWidth: 480),
+                              margin: const EdgeInsets.only(bottom: 10),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: isMe ? AppColors.primaryBlue : Colors.white,
+                                borderRadius: BorderRadius.only(
+                                  topLeft: const Radius.circular(16),
+                                  topRight: const Radius.circular(16),
+                                  bottomLeft: Radius.circular(isMe ? 16 : 4),
+                                  bottomRight: Radius.circular(isMe ? 4 : 16),
+                                ),
+                                border: isMe ? null : Border.all(color: Colors.grey.shade200),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.04),
+                                    blurRadius: 3,
+                                    offset: const Offset(0, 1),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                crossAxisAlignment:
+                                    isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    text,
+                                    style: TextStyle(
+                                      color: isMe ? Colors.white : Colors.black87,
+                                      fontSize: 14,
+                                      height: 1.3,
+                                    ),
+                                  ),
+                                  if (time.isNotEmpty) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      time,
+                                      style: TextStyle(
+                                        color: isMe
+                                            ? Colors.white.withOpacity(0.7)
+                                            : Colors.grey.shade500,
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          );
+                        },
                       );
                     },
-                  );
-                },
-              ),
-            ),
-
-            // Barra inferior para redactar
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    offset: const Offset(0, -1),
-                    blurRadius: 4,
                   ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(24),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        offset: const Offset(0, -1),
+                        blurRadius: 4,
                       ),
-                      child: TextField(
-                        controller: _messageCtrl,
-                        textCapitalization: TextCapitalization.sentences,
-                        maxLines: null,
-                        keyboardType: TextInputType.multiline,
-                        decoration: const InputDecoration(
-                          hintText: 'Escribe un mensaje...',
-                          border: InputBorder.none,
-                          contentPadding:
-                              EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(24),
+                          ),
+                          child: TextField(
+                            controller: _messageCtrl,
+                            textCapitalization: TextCapitalization.sentences,
+                            maxLines: null,
+                            keyboardType: TextInputType.multiline,
+                            decoration: const InputDecoration(
+                              hintText: 'Escribe un mensaje...',
+                              border: InputBorder.none,
+                              contentPadding:
+                                  EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            ),
+                            onSubmitted: (_) => _sendMessage(),
+                          ),
                         ),
-                        onSubmitted: (_) => _sendMessage(),
                       ),
-                    ),
+                      const SizedBox(width: 8),
+                      InkWell(
+                        onTap: _isSending ? null : _sendMessage,
+                        borderRadius: BorderRadius.circular(24),
+                        child: CircleAvatar(
+                          radius: 22,
+                          backgroundColor: AppColors.primaryBlue,
+                          child: _isSending
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.send, color: Colors.white, size: 20),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  InkWell(
-                    onTap: _isSending ? null : _sendMessage,
-                    borderRadius: BorderRadius.circular(24),
-                    child: CircleAvatar(
-                      radius: 22,
-                      backgroundColor: AppColors.primaryBlue,
-                      child: _isSending
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.send, color: Colors.white, size: 20),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
