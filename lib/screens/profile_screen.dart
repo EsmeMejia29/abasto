@@ -5,7 +5,8 @@ import '../main.dart';
 import '../theme/app_theme.dart';
 import '../config/session_manager.dart';
 import '../utils/error_handler.dart';
-import 'auth_screen.dart';
+import 'admin/admin_settlements_screen.dart';
+import 'supplier/supplier_bank_settings_screen.dart';
 import 'welcome_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -26,6 +27,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   String? _avatarUrl;
   String _role = 'restaurant';
+  String _userEmail = '';
   double _rating = 5.0;
   int _reviewsCount = 0;
   List<Map<String, dynamic>> _myReviews = [];
@@ -35,6 +37,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   String get _currentUserId =>
       supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
+
+  bool get _isAdmin =>
+      _role.toLowerCase() == 'admin' ||
+      _userEmail.toLowerCase().trim() == 'esmejia.ramos@gmail.com'; // O el rol configurado en tu perfil
 
   @override
   void initState() {
@@ -55,6 +61,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _loadProfileAndReviews() async {
     try {
+      final user = supabase.auth.currentUser;
+      _userEmail = user?.email ?? '';
+
       final res = await supabase
           .from('profiles')
           .select('*')
@@ -68,7 +77,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _addressCtrl.text = res['address'] ?? '';
           _websiteCtrl.text = res['website'] ?? '';
           _nrcNitCtrl.text = res['nrc_nit'] ?? '';
-          _hoursCtrl.text = res['business_hours'] ?? 'Lunes a Sábado: 7:00 AM - 5:00 PM';
+          _hoursCtrl.text =
+              res['business_hours'] ?? 'Lunes a Sábado: 7:00 AM - 5:00 PM';
           _avatarUrl = res['avatar_url'];
           _role = res['role'] ?? 'restaurant';
           _rating = (res['rating'] as num?)?.toDouble() ?? 5.0;
@@ -111,7 +121,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final bytes = await picked.readAsBytes();
       final ext = picked.name.split('.').last.toLowerCase();
       final mime = ext == 'png' ? 'image/png' : 'image/jpeg';
-      final fileName = 'avatar_${_currentUserId}_${DateTime.now().millisecondsSinceEpoch}.$ext';
+      final fileName =
+          'avatar_${_currentUserId}_${DateTime.now().millisecondsSinceEpoch}.$ext';
 
       await supabase.storage.from('product-images').uploadBinary(
             fileName,
@@ -119,9 +130,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             fileOptions: FileOptions(contentType: mime, upsert: true),
           );
 
-      final url = supabase.storage.from('product-images').getPublicUrl(fileName);
+      final url =
+          supabase.storage.from('product-images').getPublicUrl(fileName);
 
-      await supabase.from('profiles').update({'avatar_url': url}).eq('id', _currentUserId);
+      await supabase
+          .from('profiles')
+          .update({'avatar_url': url}).eq('id', _currentUserId);
 
       if (mounted) {
         setState(() {
@@ -175,7 +189,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (mounted) {
         final msg = ErrorHandler.parse(e);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al guardar: $msg'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Error al guardar: $msg'),
+              backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -195,9 +211,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: const Text('Cancelar'),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700),
+            style:
+                ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Cerrar Sesión', style: TextStyle(color: Colors.white)),
+            child: const Text('Cerrar Sesión',
+                style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -253,9 +271,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   CircleAvatar(
                     radius: 48,
                     backgroundColor: AppColors.primaryBlue.withOpacity(0.12),
-                    backgroundImage: (_avatarUrl != null && _avatarUrl!.isNotEmpty)
-                        ? NetworkImage(_avatarUrl!)
-                        : null,
+                    backgroundImage:
+                        (_avatarUrl != null && _avatarUrl!.isNotEmpty)
+                            ? NetworkImage(_avatarUrl!)
+                            : null,
                     child: (_avatarUrl == null || _avatarUrl!.isEmpty)
                         ? (_isUploadingPhoto
                             ? const CircularProgressIndicator()
@@ -275,10 +294,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   InkWell(
                     onTap: _isUploadingPhoto ? null : _pickAndUploadAvatar,
-                    child: CircleAvatar(
+                    child: const CircleAvatar(
                       radius: 17,
                       backgroundColor: AppColors.primaryBlue,
-                      child: const Icon(Icons.camera_alt, color: Colors.white, size: 17),
+                      child: Icon(Icons.camera_alt,
+                          color: Colors.white, size: 17),
                     ),
                   ),
                 ],
@@ -291,10 +311,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(width: 4),
                   Text(
                     '$_rating ($_reviewsCount reseñas)',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                   const SizedBox(width: 10),
-                  const Icon(Icons.verified, color: AppColors.tealMint, size: 18),
+                  const Icon(Icons.verified,
+                      color: AppColors.tealMint, size: 18),
                   const SizedBox(width: 4),
                   const Text(
                     'Verificado',
@@ -308,11 +330,106 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 2),
               Text(
-                _role == 'supplier' ? 'Distribuidor Mayorista' : 'Restaurante / Cafetería',
-                style: const TextStyle(color: AppColors.subtitleGrey, fontSize: 13),
+                _isAdmin
+                    ? 'Administrador Abasto'
+                    : (_role == 'supplier'
+                        ? 'Distribuidor Mayorista'
+                        : 'Restaurante / Cafetería'),
+                style: const TextStyle(
+                    color: AppColors.subtitleGrey, fontSize: 13),
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
+
+              // ACCESO AL PANEL DE ADMINISTRADOR (Visible para rol admin)
+              if (_isAdmin) ...[
+                Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0F172A),
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.08),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 6),
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.admin_panel_settings,
+                          color: Colors.white, size: 24),
+                    ),
+                    title: const Text(
+                      'Panel de Liquidaciones (Admin)',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14),
+                    ),
+                    subtitle: const Text(
+                      'Ver saldos y transferir a distribuidores cada viernes',
+                      style: TextStyle(
+                          color: Color(0xFF94A3B8), fontSize: 12),
+                    ),
+                    trailing: const Icon(Icons.arrow_forward_ios,
+                        color: Colors.white70, size: 16),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              const AdminSettlementsScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // ACCESO A CUENTA BANCARIA PARA DISTRIBUIDOR
+              if (_role == 'supplier') ...[
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: ListTile(
+                    leading: const Icon(Icons.account_balance,
+                        color: AppColors.primaryBlue),
+                    title: const Text(
+                      'Configurar Cuenta Bancaria',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                    subtitle: const Text(
+                      'Datos para recibir tus pagos los viernes',
+                      style: TextStyle(
+                          fontSize: 12, color: AppColors.subtitleGrey),
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              const SupplierBankSettingsScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
 
               TextFormField(
                 controller: _businessNameCtrl,
@@ -320,7 +437,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   labelText: 'Nombre Comercial / Marca',
                   prefixIcon: Icon(Icons.storefront_outlined),
                 ),
-                validator: (val) => val == null || val.trim().isEmpty ? 'Requerido' : null,
+                validator: (val) =>
+                    val == null || val.trim().isEmpty ? 'Requerido' : null,
               ),
               const SizedBox(height: 14),
 
@@ -437,7 +555,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: const Center(
                     child: Text(
                       'Aún no tienes reseñas registradas.',
-                      style: TextStyle(color: AppColors.subtitleGrey, fontSize: 13),
+                      style: TextStyle(
+                          color: AppColors.subtitleGrey, fontSize: 13),
                     ),
                   ),
                 )
@@ -461,11 +580,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(author, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            Text(author,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold)),
                             Row(
                               children: List.generate(5, (starIdx) {
                                 return Icon(
-                                  starIdx < rating ? Icons.star : Icons.star_border,
+                                  starIdx < rating
+                                      ? Icons.star
+                                      : Icons.star_border,
                                   color: Colors.amber,
                                   size: 16,
                                 );
@@ -475,7 +598,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         if (comment.isNotEmpty) ...[
                           const SizedBox(height: 6),
-                          Text(comment, style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                          Text(comment,
+                              style: const TextStyle(
+                                  fontSize: 13, color: Colors.black87)),
                         ],
                       ],
                     ),
@@ -501,7 +626,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   icon: const Icon(Icons.logout_rounded, size: 20),
                   label: const Text(
                     'Cerrar Sesión',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                    style:
+                        TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                   ),
                   onPressed: _logout,
                 ),

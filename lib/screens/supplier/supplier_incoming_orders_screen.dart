@@ -6,6 +6,7 @@ import '../../theme/app_theme.dart';
 import '../../config/session_manager.dart';
 import '../order_chat_screen.dart';
 import '../../widgets/review_dialog.dart';
+import 'supplier_bank_settings_screen.dart';
 
 class SupplierIncomingOrdersScreen extends StatefulWidget {
   const SupplierIncomingOrdersScreen({super.key});
@@ -18,11 +19,14 @@ class SupplierIncomingOrdersScreen extends StatefulWidget {
 class _SupplierIncomingOrdersScreenState
     extends State<SupplierIncomingOrdersScreen> {
   RealtimeChannel? _ordersSubscription;
+  RealtimeChannel? _payoutsSubscription;
   late Future<List<Map<String, dynamic>>> _ordersFuture;
 
   final TextEditingController _searchCtrl = TextEditingController();
   String _selectedStatusFilter = 'todos';
   String _searchQuery = '';
+
+  static const double _supplierCommissionRate = 0.05; // 5% comisión Abasto
 
   String get _currentUserId =>
       supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
@@ -52,11 +56,25 @@ class _SupplierIncomingOrdersScreenState
           },
         )
         .subscribe();
+
+    _payoutsSubscription = supabase
+        .channel('public:supplier_payouts_channel')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'supplier_payouts',
+          callback: (payload) {
+            debugPrint('Actualización en billetera de distribuidor recibida');
+            if (mounted) setState(() {});
+          },
+        )
+        .subscribe();
   }
 
   @override
   void dispose() {
     _ordersSubscription?.unsubscribe();
+    _payoutsSubscription?.unsubscribe();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -230,6 +248,31 @@ class _SupplierIncomingOrdersScreenState
         'status_history': newHistory,
       }).eq('id', orderId);
 
+      // Si se marca como entregado, asegurar que se registre en supplier_payouts si no existía
+      if (newStatus.toLowerCase() == 'entregado') {
+        final existingPayout = await supabase
+            .from('supplier_payouts')
+            .select('id')
+            .eq('order_id', orderId)
+            .maybeSingle();
+
+        if (existingPayout == null) {
+          final subtotal = (order['total_amount'] as num?)?.toDouble() ?? 0.0;
+          final commission = subtotal * _supplierCommissionRate;
+          final netPayout = subtotal - commission;
+
+          await supabase.from('supplier_payouts').insert({
+            'supplier_id': _currentUserId,
+            'order_id': orderId,
+            'order_code': order['code'] ?? 'ORD-000',
+            'gross_amount': subtotal,
+            'commission_fee': commission,
+            'net_payout': netPayout,
+            'status': 'disponible',
+          });
+        }
+      }
+
       _refresh();
 
       if (mounted) {
@@ -250,6 +293,136 @@ class _SupplierIncomingOrdersScreenState
         );
       }
     }
+  }
+
+  // Componente de Cartera / Saldo y Liquidaciones
+  Widget _buildWalletCard() {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: supabase
+          .from('supplier_payouts')
+          .select('*')
+          .eq('supplier_id', _currentUserId)
+          .eq('status', 'disponible'),
+      builder: (context, snapshot) {
+        final list = snapshot.data ?? [];
+        double totalAcumulado = 0.0;
+        for (var row in list) {
+          totalAcumulado += (row['net_payout'] as num?)?.toDouble() ?? 0.0;
+        }
+
+        return Container(
+          margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.08),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(Icons.account_balance_wallet_outlined,
+                            color: Colors.white, size: 22),
+                      ),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            'Saldo por Liquidar',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            'Corte semanal: Viernes',
+                            style: TextStyle(
+                              color: Color(0xFF94A3B8),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  Text(
+                    '\$${totalAcumulado.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      color: Color(0xFF4ADE80),
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Divider(color: Color(0xFF334155), height: 1),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Retención Abasto por pedido: 5%',
+                    style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                  ),
+                  InkWell(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const SupplierBankSettingsScreen(),
+                        ),
+                      ).then((_) => setState(() {}));
+                    },
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      child: Row(
+                        children: const [
+                          Icon(Icons.account_balance, color: Colors.white70, size: 14),
+                          SizedBox(width: 5),
+                          Text(
+                            'Configurar Cuenta Bancaria',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              decoration: TextDecoration.underline,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   void _showRestaurantProfileModal(Map<String, dynamic> order) {
@@ -480,7 +653,10 @@ class _SupplierIncomingOrdersScreenState
   Widget _buildOrderCard(Map<String, dynamic> order) {
     final code = order['code'] ?? 'ORD-000';
     final restaurantName = order['restaurant_name'] ?? 'Restaurante';
-    final total = (order['total_amount'] as num?)?.toDouble() ?? 0.0;
+    final subtotal = (order['total_amount'] as num?)?.toDouble() ?? 0.0;
+    final commission = subtotal * _supplierCommissionRate;
+    final netEarnings = subtotal - commission;
+
     final status = (order['status'] ?? 'pendiente').toString();
     final items = (order['order_items'] as List<dynamic>?) ?? [];
 
@@ -607,19 +783,46 @@ class _SupplierIncomingOrdersScreenState
                     fontStyle: FontStyle.italic,
                     color: AppColors.subtitleGrey),
               ),
-            const Divider(height: 16),
+            const Divider(height: 14),
+
+            // Desglose de liquidación por orden
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Total orden:',
-                    style:
-                        TextStyle(fontSize: 12, color: AppColors.subtitleGrey)),
+                const Text('Venta bruta:',
+                    style: TextStyle(fontSize: 12, color: AppColors.subtitleGrey)),
+                Text('\$${subtotal.toStringAsFixed(2)}',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Uso Abasto (5%):',
+                    style: TextStyle(fontSize: 12, color: AppColors.subtitleGrey)),
+                Text('-\$${commission.toStringAsFixed(2)}',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.red.shade700)),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Tu pago neto a recibir:',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.navyDark)),
                 Text(
-                  '\$${total.toStringAsFixed(2)}',
+                  '\$${netEarnings.toStringAsFixed(2)}',
                   style: const TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.bold,
-                    color: AppColors.navyDark,
+                    color: Colors.green,
                   ),
                 ),
               ],
@@ -648,7 +851,7 @@ class _SupplierIncomingOrdersScreenState
                                             0.0,
                                   ))
                               .toList(),
-                          totalAmount: total,
+                          totalAmount: subtotal,
                           status: status == 'enRuta'
                               ? OrderStatus.enRuta
                               : (status == 'entregado'
@@ -827,8 +1030,13 @@ class _SupplierIncomingOrdersScreenState
               constraints: const BoxConstraints(maxWidth: 1200),
               child: Column(
                 children: [
+                  // 1. Tarjeta de Cartera / Saldo Disponible y Liquidación
+                  _buildWalletCard(),
+
+                  // 2. Buscador y Filtros
                   Container(
                     color: Colors.white,
+                    margin: const EdgeInsets.only(top: 8),
                     padding: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 12),
                     child: Column(
@@ -877,6 +1085,8 @@ class _SupplierIncomingOrdersScreenState
                       ],
                     ),
                   ),
+
+                  // 3. Listado o Grid de Pedidos
                   Expanded(
                     child: filteredOrders.isEmpty
                         ? Center(
@@ -906,7 +1116,7 @@ class _SupplierIncomingOrdersScreenState
                                     crossAxisCount: 2,
                                     crossAxisSpacing: 18,
                                     mainAxisSpacing: 18,
-                                    mainAxisExtent: 315,
+                                    mainAxisExtent: 360,
                                   ),
                                   itemCount: filteredOrders.length,
                                   itemBuilder: (context, index) =>

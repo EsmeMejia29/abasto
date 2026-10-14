@@ -23,6 +23,8 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
   final Map<String, int> _selectedQuantities = {};
   bool _isSubmitting = false;
 
+  static const double _platformFeeRate = 0.02; // Tarifa 2% Abasto
+
   final TextEditingController _searchCtrl = TextEditingController();
   String _selectedCategory = 'Todos';
   List<String> _supplierCategories = ['Todos'];
@@ -73,13 +75,21 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     });
   }
 
-  double _calculateTotal() {
+  double _calculateSubtotal() {
     double total = 0.0;
     for (var product in _allProducts) {
       final qty = _selectedQuantities[product.id] ?? 0;
       total += qty * product.price;
     }
     return total;
+  }
+
+  int _totalItemsCount() {
+    int count = 0;
+    for (var qty in _selectedQuantities.values) {
+      count += qty;
+    }
+    return count;
   }
 
   void _openBusinessInfo() {
@@ -91,7 +101,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     );
   }
 
-  Future<void> _submitOrder(double total) async {
+  Future<void> _submitOrder(double subtotal) async {
     setState(() => _isSubmitting = true);
     try {
       final restaurantId =
@@ -113,7 +123,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
           'code': orderCode,
           'restaurant_id': restaurantId,
           'supplier_id': widget.supplier.id,
-          'total_amount': total,
+          'total_amount': subtotal,
           'status': 'pendiente',
           'status_history': initialHistory,
           'is_financed': false,
@@ -124,7 +134,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
           'code': orderCode,
           'restaurant_id': restaurantId,
           'supplier_id': widget.supplier.id,
-          'total_amount': total,
+          'total_amount': subtotal,
           'status': 'pendiente',
           'is_financed': false,
           'installments_count': 1,
@@ -172,6 +182,279 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
+  }
+
+  // Modal / Sección del Carrito de Compras
+  void _openCartModal() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          final selectedProducts = _allProducts
+              .where((p) => (_selectedQuantities[p.id] ?? 0) > 0)
+              .toList();
+
+          double currentSubtotal = 0.0;
+          for (var p in selectedProducts) {
+            currentSubtotal += (_selectedQuantities[p.id] ?? 0) * p.price;
+          }
+          final double fee = currentSubtotal * _platformFeeRate;
+          final double totalWithFee = currentSubtotal + fee;
+
+          return Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 20,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.shopping_cart_outlined,
+                            color: AppColors.primaryBlue, size: 24),
+                        const SizedBox(width: 8),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Carrito de Pedido',
+                              style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.navyDark),
+                            ),
+                            Text(
+                              widget.supplier.name,
+                              style: const TextStyle(
+                                  fontSize: 12, color: AppColors.subtitleGrey),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+                const Divider(height: 20),
+
+                if (selectedProducts.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 30),
+                    child: Center(
+                      child: Column(
+                        children: const [
+                          Icon(Icons.remove_shopping_cart_outlined,
+                              size: 48, color: Colors.grey),
+                          SizedBox(height: 10),
+                          Text('Tu carrito está vacío.',
+                              style: TextStyle(color: AppColors.subtitleGrey)),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 260),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: selectedProducts.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (_, index) {
+                        final product = selectedProducts[index];
+                        final qty = _selectedQuantities[product.id] ?? 0;
+                        final itemTotal = qty * product.price;
+
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Row(
+                            children: [
+                              _buildProductThumbnail(product.imageUrl),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      product.name,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                        color: AppColors.navyDark,
+                                      ),
+                                    ),
+                                    Text(
+                                      '\$${product.price.toStringAsFixed(2)} • ${product.unit}',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: AppColors.subtitleGrey,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Row(
+                                children: [
+                                  IconButton(
+                                    iconSize: 20,
+                                    splashRadius: 20,
+                                    icon: const Icon(Icons.remove_circle_outline,
+                                        color: Colors.red),
+                                    onPressed: () {
+                                      setState(() {
+                                        _selectedQuantities[product.id] =
+                                            qty - 1;
+                                      });
+                                      setModalState(() {});
+                                    },
+                                  ),
+                                  Text(
+                                    '$qty',
+                                    style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.bold),
+                                  ),
+                                  IconButton(
+                                    iconSize: 20,
+                                    splashRadius: 20,
+                                    icon: const Icon(Icons.add_circle_outline,
+                                        color: AppColors.primaryBlue),
+                                    onPressed: () {
+                                      setState(() {
+                                        _selectedQuantities[product.id] =
+                                            qty + 1;
+                                      });
+                                      setModalState(() {});
+                                    },
+                                  ),
+                                ],
+                              ),
+                              SizedBox(
+                                width: 55,
+                                child: Text(
+                                  '\$${itemTotal.toStringAsFixed(2)}',
+                                  textAlign: TextAlign.end,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.navyDark,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+
+                const Divider(height: 20),
+
+                // Resumen Financiero con Comisión del 2%
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Subtotal Insumos:',
+                              style: TextStyle(
+                                  fontSize: 13, color: AppColors.subtitleGrey)),
+                          Text('\$${currentSubtotal.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                  fontSize: 13, fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Tarifa de Servicio Abasto (2%):',
+                              style: TextStyle(
+                                  fontSize: 13, color: AppColors.subtitleGrey)),
+                          Text('\$${fee.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.primaryBlue)),
+                        ],
+                      ),
+                      const Divider(height: 14),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Total a Pagar:',
+                            style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.navyDark),
+                          ),
+                          Text(
+                            '\$${totalWithFee.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.navyDark),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                SizedBox(
+                  width: double.infinity,
+                  height: 46,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primaryBlue,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    onPressed: selectedProducts.isEmpty || _isSubmitting
+                        ? null
+                        : () {
+                            Navigator.pop(ctx);
+                            _submitOrder(currentSubtotal);
+                          },
+                    icon: const Icon(Icons.check_circle_outline, size: 20),
+                    label: Text(
+                      'Confirmar Pedido (\$${totalWithFee.toStringAsFixed(2)})',
+                      style: const TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Widget _buildSupplierHeader() {
@@ -339,7 +622,8 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final currentTotal = _calculateTotal();
+    final currentSubtotal = _calculateSubtotal();
+    final totalItems = _totalItemsCount();
 
     return Scaffold(
       appBar: AppBar(
@@ -542,7 +826,8 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                       ),
               ),
 
-              if (currentTotal > 0)
+              // Barra inferior interactiva de Carrito
+              if (currentSubtotal > 0)
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
@@ -560,24 +845,44 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text(
-                              'Total del pedido:',
-                              style: TextStyle(
-                                  color: AppColors.subtitleGrey, fontSize: 12),
+                        InkWell(
+                          onTap: _openCartModal,
+                          borderRadius: BorderRadius.circular(8),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Icon(Icons.shopping_cart_outlined,
+                                        size: 15,
+                                        color: AppColors.primaryBlue),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '$totalItems insumo(s) • Ver Carrito',
+                                      style: const TextStyle(
+                                        color: AppColors.primaryBlue,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Subtotal: \$${currentSubtotal.toStringAsFixed(2)}',
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.navyDark,
+                                  ),
+                                ),
+                              ],
                             ),
-                            Text(
-                              '\$${currentTotal.toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.navyDark,
-                              ),
-                            ),
-                          ],
+                          ),
                         ),
                         ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
@@ -589,25 +894,12 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                               borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          onPressed: _isSubmitting
-                              ? null
-                              : () => _submitOrder(currentTotal),
-                          icon: _isSubmitting
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : const Icon(Icons.shopping_bag_outlined,
-                                  size: 18),
-                          label: Text(
-                            _isSubmitting
-                                ? 'Procesando...'
-                                : 'Confirmar Pedido',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          onPressed: _isSubmitting ? null : _openCartModal,
+                          icon: const Icon(Icons.shopping_bag_outlined,
+                              size: 18),
+                          label: const Text(
+                            'Ver Carrito',
+                            style: TextStyle(fontWeight: FontWeight.bold),
                           ),
                         ),
                       ],

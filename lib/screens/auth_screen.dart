@@ -4,6 +4,7 @@ import '../config/session_manager.dart';
 import '../main.dart';
 import '../theme/app_theme.dart';
 import '../utils/error_handler.dart';
+import 'admin/admin_settlements_screen.dart';
 import 'restaurant_onboarding_screen.dart';
 import 'supplier/supplier_onboarding_screen.dart';
 
@@ -62,6 +63,29 @@ class _AuthScreenState extends State<AuthScreen> {
         ),
       );
       return;
+    }
+
+    // ----------------------------------------------------
+    // ACCESO DIRECTO DE ADMINISTRADOR (abasto.developers@gmail.com)
+    // ----------------------------------------------------
+    if (email.toLowerCase() == 'abasto.developers@gmail.com') {
+      if (password == 'Abasto2026*' || password == 'admin123' || password == '123456') {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (context) => const AdminSettlementsScreen(),
+          ),
+          (route) => false,
+        );
+        return;
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Contraseña de administrador incorrecta.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
     }
 
     setState(() => _isLoading = true);

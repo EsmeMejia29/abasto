@@ -47,7 +47,7 @@ class AbastoApp extends StatelessWidget {
   }
 }
 
-/// Contenedor de navegación para Restaurante (4 pestañas, sin financiamiento)
+/// Contenedor de navegación para Restaurante
 class MainNavigationHolder extends StatefulWidget {
   const MainNavigationHolder({super.key});
 
@@ -102,7 +102,7 @@ class _MainNavigationHolderState extends State<MainNavigationHolder> {
   }
 }
 
-/// Contenedor de navegación para Distribuidor / Proveedor (Despachos, Catálogo, CRM y Perfil)
+/// Contenedor de navegación para Distribuidor / Proveedor
 class SupplierNavigationHolder extends StatefulWidget {
   const SupplierNavigationHolder({super.key});
 

@@ -79,6 +79,8 @@ class _SupplierCrmScreenState extends State<SupplierCrmScreen> {
 
     try {
       final startDate = _getPeriodStartDate();
+      
+      // Filtrar únicamente pedidos con estado 'entregado'
       var query = supabase
           .from('orders')
           .select('''
@@ -94,7 +96,7 @@ class _SupplierCrmScreenState extends State<SupplierCrmScreen> {
             )
           ''')
           .eq('supplier_id', _currentUserId)
-          .neq('status', 'cancelado');
+          .eq('status', 'entregado');
 
       if (startDate != null) {
         query = query.gte('created_at', startDate.toIso8601String());
@@ -474,7 +476,7 @@ class _SupplierCrmScreenState extends State<SupplierCrmScreen> {
                           ),
                           const SizedBox(height: 24),
 
-                          // 3. Dos Columnas en Computadora / Vertical en Celular
+                          // 3. Gráficas de barras comparativas
                           LayoutBuilder(
                             builder: (context, constraints) {
                               final isDesktop = constraints.maxWidth >= 850;
