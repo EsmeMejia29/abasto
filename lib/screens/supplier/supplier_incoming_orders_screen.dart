@@ -27,6 +27,7 @@ class _SupplierIncomingOrdersScreenState
   String _searchQuery = '';
 
   static const double _supplierCommissionRate = 0.05; // 5% comisión Abasto
+  Set<String> _paidOrderIds = {}; // Órdenes ya liquidadas por el admin
 
   String get _currentUserId =>
       supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
@@ -65,7 +66,7 @@ class _SupplierIncomingOrdersScreenState
           table: 'supplier_payouts',
           callback: (payload) {
             debugPrint('Actualización en billetera de distribuidor recibida');
-            if (mounted) setState(() {});
+            if (mounted) _refresh();
           },
         )
         .subscribe();
@@ -86,6 +87,24 @@ class _SupplierIncomingOrdersScreenState
   }
 
   Future<List<Map<String, dynamic>>> _fetchOrders() async {
+    // 1. Obtener órdenes ya transferidas / liquidadas en supplier_payouts
+    try {
+      final paidRes = await supabase
+          .from('supplier_payouts')
+          .select('order_id')
+          .eq('supplier_id', _currentUserId)
+          .eq('status', 'liquidado');
+
+      _paidOrderIds = (paidRes as List<dynamic>)
+          .map((p) => p['order_id']?.toString())
+          .where((id) => id != null)
+          .cast<String>()
+          .toSet();
+    } catch (e) {
+      debugPrint("Error obteniendo pagos liquidados: $e");
+    }
+
+    // 2. Obtener órdenes del distribuidor
     final res = await supabase
         .from('orders')
         .select('''
@@ -248,31 +267,6 @@ class _SupplierIncomingOrdersScreenState
         'status_history': newHistory,
       }).eq('id', orderId);
 
-      // Si se marca como entregado, asegurar que se registre en supplier_payouts si no existía
-      if (newStatus.toLowerCase() == 'entregado') {
-        final existingPayout = await supabase
-            .from('supplier_payouts')
-            .select('id')
-            .eq('order_id', orderId)
-            .maybeSingle();
-
-        if (existingPayout == null) {
-          final subtotal = (order['total_amount'] as num?)?.toDouble() ?? 0.0;
-          final commission = subtotal * _supplierCommissionRate;
-          final netPayout = subtotal - commission;
-
-          await supabase.from('supplier_payouts').insert({
-            'supplier_id': _currentUserId,
-            'order_id': orderId,
-            'order_code': order['code'] ?? 'ORD-000',
-            'gross_amount': subtotal,
-            'commission_fee': commission,
-            'net_payout': netPayout,
-            'status': 'disponible',
-          });
-        }
-      }
-
       _refresh();
 
       if (mounted) {
@@ -295,133 +289,132 @@ class _SupplierIncomingOrdersScreenState
     }
   }
 
-  // Componente de Cartera / Saldo y Liquidaciones
-  Widget _buildWalletCard() {
-    return FutureBuilder<List<Map<String, dynamic>>>(
-      future: supabase
-          .from('supplier_payouts')
-          .select('*')
-          .eq('supplier_id', _currentUserId)
-          .eq('status', 'disponible'),
-      builder: (context, snapshot) {
-        final list = snapshot.data ?? [];
-        double totalAcumulado = 0.0;
-        for (var row in list) {
-          totalAcumulado += (row['net_payout'] as num?)?.toDouble() ?? 0.0;
-        }
+  // Componente de Cartera: Calcula el saldo pendiente excluyendo lo ya liquidado por Admin
+  Widget _buildWalletCard(List<Map<String, dynamic>> allOrders) {
+    double totalPorLiquidar = 0.0;
 
-        return Container(
-          margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.08),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
-            ],
+    for (var ord in allOrders) {
+      final st = (ord['status'] ?? '').toString().toLowerCase();
+      final ordId = ord['id'].toString();
+
+      // Solo pedidos entregados y que aún NO hayan sido transferidos por Admin
+      if (st == 'entregado' && !_paidOrderIds.contains(ordId)) {
+        final subtotal = (ord['total_amount'] as num?)?.toDouble() ?? 0.0;
+        final commission = subtotal * _supplierCommissionRate;
+        totalPorLiquidar += (subtotal - commission);
+      }
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
-          child: Column(
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(10),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.account_balance_wallet_outlined,
+                        color: Colors.white, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: const [
+                      Text(
+                        'Saldo por Liquidar',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
                         ),
-                        child: const Icon(Icons.account_balance_wallet_outlined,
-                            color: Colors.white, size: 22),
                       ),
-                      const SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Text(
-                            'Saldo por Liquidar',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          Text(
-                            'Corte semanal: Viernes',
-                            style: TextStyle(
-                              color: Color(0xFF94A3B8),
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
+                      Text(
+                        'Corte semanal: Viernes',
+                        style: TextStyle(
+                          color: Color(0xFF94A3B8),
+                          fontSize: 12,
+                        ),
                       ),
                     ],
                   ),
-                  Text(
-                    '\$${totalAcumulado.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      color: Color(0xFF4ADE80),
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
                 ],
               ),
-              const SizedBox(height: 12),
-              const Divider(color: Color(0xFF334155), height: 1),
-              const SizedBox(height: 10),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Retención Abasto por pedido: 5%',
-                    style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-                  ),
-                  InkWell(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const SupplierBankSettingsScreen(),
-                        ),
-                      ).then((_) => setState(() {}));
-                    },
-                    borderRadius: BorderRadius.circular(6),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                      child: Row(
-                        children: const [
-                          Icon(Icons.account_balance, color: Colors.white70, size: 14),
-                          SizedBox(width: 5),
-                          Text(
-                            'Configurar Cuenta Bancaria',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              decoration: TextDecoration.underline,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
+              Text(
+                '\$${totalPorLiquidar.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  color: Color(0xFF4ADE80),
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ],
           ),
-        );
-      },
+          const SizedBox(height: 12),
+          const Divider(color: Color(0xFF334155), height: 1),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Retención Abasto por pedido: 5%',
+                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+              ),
+              InkWell(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const SupplierBankSettingsScreen(),
+                    ),
+                  ).then((_) => _refresh());
+                },
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  child: Row(
+                    children: const [
+                      Icon(Icons.account_balance, color: Colors.white70, size: 14),
+                      SizedBox(width: 5),
+                      Text(
+                        'Configurar Cuenta Bancaria',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -659,6 +652,7 @@ class _SupplierIncomingOrdersScreenState
 
     final status = (order['status'] ?? 'pendiente').toString();
     final items = (order['order_items'] as List<dynamic>?) ?? [];
+    final bool isLiquidado = _paidOrderIds.contains(order['id'].toString());
 
     return Card(
       elevation: 1.5,
@@ -827,6 +821,39 @@ class _SupplierIncomingOrdersScreenState
                 ),
               ],
             ),
+
+            // Estado de Liquidación Bancaria de la orden
+            if (status.toLowerCase() == 'entregado') ...[
+              const SizedBox(height: 6),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isLiquidado ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isLiquidado ? Icons.check_circle : Icons.schedule,
+                      size: 14,
+                      color: isLiquidado ? const Color(0xFF16A34A) : const Color(0xFFB45309),
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      isLiquidado ? 'Transferido a tu banco' : 'Pendiente de liquidación (Viernes)',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: isLiquidado ? const Color(0xFF16A34A) : const Color(0xFFB45309),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
             const SizedBox(height: 10),
             Row(
               children: [
@@ -1030,8 +1057,8 @@ class _SupplierIncomingOrdersScreenState
               constraints: const BoxConstraints(maxWidth: 1200),
               child: Column(
                 children: [
-                  // 1. Tarjeta de Cartera / Saldo Disponible y Liquidación
-                  _buildWalletCard(),
+                  // 1. Tarjeta de Cartera: Saldo que realmente falta por liquidar
+                  _buildWalletCard(allOrders),
 
                   // 2. Buscador y Filtros
                   Container(
@@ -1116,7 +1143,7 @@ class _SupplierIncomingOrdersScreenState
                                     crossAxisCount: 2,
                                     crossAxisSpacing: 18,
                                     mainAxisSpacing: 18,
-                                    mainAxisExtent: 360,
+                                    mainAxisExtent: 380,
                                   ),
                                   itemCount: filteredOrders.length,
                                   itemBuilder: (context, index) =>

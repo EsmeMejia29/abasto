@@ -139,8 +139,10 @@ class _OrdersScreenState extends State<OrdersScreen> {
   }
 
   // Wompi Checkout con cálculo del 2%
+  // Wompi Checkout con confirmación y actualización a 'confirmado'
   Future<void> _payOrderWithWompi(Map<String, dynamic> order) async {
     final code = order['code'] ?? 'ORD-000';
+    final orderId = order['id'].toString();
     final subtotal = (order['total_amount'] as num?)?.toDouble() ?? 0.0;
     final fee = subtotal * _platformFeeRate;
     final totalToPay = double.parse((subtotal + fee).toStringAsFixed(2));
@@ -175,7 +177,74 @@ class _OrdersScreenState extends State<OrdersScreen> {
       final uri = Uri.parse(paymentUrl);
 
       if (await canLaunchUrl(uri)) {
+        // 1. Abrir la pasarela de pago Wompi
         await launchUrl(uri, mode: LaunchMode.externalApplication);
+
+        // 2. Diálogo interactivo al volver a la app para confirmar que el pago finalizó
+        if (mounted) {
+          final paidSuccess = await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) => AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                children: const [
+                  Icon(Icons.payment, color: Color(0xFF4F46E5)),
+                  SizedBox(width: 8),
+                  Text('Verificando Pago Wompi'),
+                ],
+              ),
+              content: Text(
+                '¿Completaste el pago de \$$totalToPay para la orden $code en la ventana de Wompi?',
+                style: const TextStyle(fontSize: 14),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Aún no / Cancelar', style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF16A34A),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  icon: const Icon(Icons.check_circle_outline, size: 18),
+                  label: const Text('Sí, Pago Realizado', style: TextStyle(fontWeight: FontWeight.bold)),
+                  onPressed: () => Navigator.pop(ctx, true),
+                ),
+              ],
+            ),
+          );
+
+          // 3. Si el pago fue completado, actualizamos el pedido en Supabase a 'confirmado'
+          if (paidSuccess == true) {
+            final currentHistory = (order['status_history'] as List<dynamic>?) ?? [];
+            final newHistory = List<dynamic>.from(currentHistory)
+              ..add({
+                'status': 'confirmado',
+                'changed_at': DateTime.now().toUtc().toIso8601String(),
+                'note': 'Pago verificado exitosamente con pasarela Wompi (\$${totalToPay.toStringAsFixed(2)})',
+              });
+
+            await supabase.from('orders').update({
+              'status': 'confirmado',
+              'status_history': newHistory,
+            }).eq('id', orderId);
+
+            _refresh();
+
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('¡Pago verificado! El pedido $code ahora está Confirmado.'),
+                  backgroundColor: AppColors.tealMint,
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            }
+          }
+        }
       } else {
         throw Exception('No se pudo abrir el navegador');
       }
