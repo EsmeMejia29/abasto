@@ -87,9 +87,9 @@ class _MainNavigationHolderState extends State<MainNavigationHolder> {
             label: 'Pedidos',
           ),
           NavigationDestination(
-            icon: Icon(Icons.analytics_outlined),
-            selectedIcon: Icon(Icons.analytics),
-            label: 'CRM',
+            icon: Icon(Icons.insights_outlined),
+            selectedIcon: Icon(Icons.insights),
+            label: 'Mis Gastos',
           ),
           NavigationDestination(
             icon: Icon(Icons.person_outline),

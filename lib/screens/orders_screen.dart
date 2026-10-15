@@ -19,9 +19,6 @@ class _OrdersScreenState extends State<OrdersScreen> {
   RealtimeChannel? _ordersSubscription;
   late Future<List<Map<String, dynamic>>> _ordersFuture;
 
-  // Tarifa del 2% al restaurante
-  static const double _platformFeeRate = 0.02;
-
   String get _currentUserId =>
       supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
 
@@ -138,14 +135,13 @@ class _OrdersScreenState extends State<OrdersScreen> {
     }
   }
 
-  // Wompi Checkout con cálculo del 2%
-  // Wompi Checkout con confirmación y actualización a 'confirmado'
+  // Wompi Checkout directo con el totalAmount (ya incluye la tarifa)
   Future<void> _payOrderWithWompi(Map<String, dynamic> order) async {
     final code = order['code'] ?? 'ORD-000';
     final orderId = order['id'].toString();
-    final subtotal = (order['total_amount'] as num?)?.toDouble() ?? 0.0;
-    final fee = subtotal * _platformFeeRate;
-    final totalToPay = double.parse((subtotal + fee).toStringAsFixed(2));
+    // El total_amount ya contiene el precio final real del cliente
+    final double totalToPay =
+        ((order['total_amount'] as num?)?.toDouble() ?? 0.0);
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -155,7 +151,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
     );
 
     try {
-      final userEmail = supabase.auth.currentUser?.email ?? 'restaurante@abasto.sv';
+      final userEmail =
+          supabase.auth.currentUser?.email ?? 'restaurante@abasto.sv';
 
       final FunctionResponse response = await supabase.functions.invoke(
         'create-wompi-payment',
@@ -169,7 +166,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
 
       final data = response.data;
       if (response.status != 200 || data == null || data['url'] == null) {
-        final errorMsg = data != null ? data['error'] : 'Error al procesar con Wompi';
+        final errorMsg =
+            data != null ? data['error'] : 'Error al procesar con Wompi';
         throw Exception(errorMsg ?? 'No se recibió la URL de pago');
       }
 
@@ -177,16 +175,15 @@ class _OrdersScreenState extends State<OrdersScreen> {
       final uri = Uri.parse(paymentUrl);
 
       if (await canLaunchUrl(uri)) {
-        // 1. Abrir la pasarela de pago Wompi
         await launchUrl(uri, mode: LaunchMode.externalApplication);
 
-        // 2. Diálogo interactivo al volver a la app para confirmar que el pago finalizó
         if (mounted) {
           final paidSuccess = await showDialog<bool>(
             context: context,
             barrierDismissible: false,
             builder: (ctx) => AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
               title: Row(
                 children: const [
                   Icon(Icons.payment, color: Color(0xFF4F46E5)),
@@ -195,36 +192,40 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 ],
               ),
               content: Text(
-                '¿Completaste el pago de \$$totalToPay para la orden $code en la ventana de Wompi?',
+                '¿Completaste el pago de \$${totalToPay.toStringAsFixed(2)} para la orden $code en Wompi?',
                 style: const TextStyle(fontSize: 14),
               ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('Aún no / Cancelar', style: TextStyle(color: Colors.grey)),
+                  child: const Text('Aún no / Cancelar',
+                      style: TextStyle(color: Colors.grey)),
                 ),
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF16A34A),
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
                   ),
                   icon: const Icon(Icons.check_circle_outline, size: 18),
-                  label: const Text('Sí, Pago Realizado', style: TextStyle(fontWeight: FontWeight.bold)),
+                  label: const Text('Sí, Pago Realizado',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
                   onPressed: () => Navigator.pop(ctx, true),
                 ),
               ],
             ),
           );
 
-          // 3. Si el pago fue completado, actualizamos el pedido en Supabase a 'confirmado'
           if (paidSuccess == true) {
-            final currentHistory = (order['status_history'] as List<dynamic>?) ?? [];
+            final currentHistory =
+                (order['status_history'] as List<dynamic>?) ?? [];
             final newHistory = List<dynamic>.from(currentHistory)
               ..add({
                 'status': 'confirmado',
                 'changed_at': DateTime.now().toUtc().toIso8601String(),
-                'note': 'Pago verificado exitosamente con pasarela Wompi (\$${totalToPay.toStringAsFixed(2)})',
+                'note':
+                    'Pago verificado exitosamente con Wompi (\$${totalToPay.toStringAsFixed(2)})',
               });
 
             await supabase.from('orders').update({
@@ -237,7 +238,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text('¡Pago verificado! El pedido $code ahora está Confirmado.'),
+                  content: Text(
+                      '¡Pago verificado! El pedido $code ahora está Confirmado.'),
                   backgroundColor: AppColors.tealMint,
                   behavior: SnackBarBehavior.floating,
                 ),
@@ -276,7 +278,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Sí, Cancelar', style: TextStyle(color: Colors.white)),
+            child:
+                const Text('Sí, Cancelar', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -285,7 +288,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
     if (confirm == true) {
       try {
         final orderId = order['id'].toString();
-        final currentHistory = (order['status_history'] as List<dynamic>?) ?? [];
+        final currentHistory =
+            (order['status_history'] as List<dynamic>?) ?? [];
         final newHistory = List<dynamic>.from(currentHistory)
           ..add({
             'status': 'cancelado',
@@ -311,7 +315,9 @@ class _OrdersScreenState extends State<OrdersScreen> {
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error al cancelar: $e'), backgroundColor: Colors.red),
+            SnackBar(
+                content: Text('Error al cancelar: $e'),
+                backgroundColor: Colors.red),
           );
         }
       }
@@ -321,7 +327,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
   // Modificar cantidades de insumos
   void _showEditOrderModal(Map<String, dynamic> order) {
     final items = List<Map<String, dynamic>>.from(
-      ((order['order_items'] as List<dynamic>?) ?? []).map((i) => Map<String, dynamic>.from(i)),
+      ((order['order_items'] as List<dynamic>?) ?? [])
+          .map((i) => Map<String, dynamic>.from(i)),
     );
 
     showModalBottomSheet(
@@ -332,15 +339,12 @@ class _OrdersScreenState extends State<OrdersScreen> {
       ),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) {
-          double newSubtotal = 0;
+          double newTotal = 0;
           for (var it in items) {
             final q = (it['quantity'] as num?)?.toInt() ?? 1;
             final p = (it['unit_price'] as num?)?.toDouble() ?? 0.0;
-            newSubtotal += q * p;
+            newTotal += q * p;
           }
-
-          final newFee = newSubtotal * _platformFeeRate;
-          final newTotal = newSubtotal + newFee;
 
           return Padding(
             padding: EdgeInsets.only(
@@ -358,7 +362,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
                   children: [
                     Text(
                       'Modificar Pedido ${order['code']}',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.bold),
                     ),
                     IconButton(
                       icon: const Icon(Icons.close),
@@ -369,7 +374,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 const Divider(),
                 const Text(
                   'Ajusta las cantidades de los insumos antes de realizar tu pago:',
-                  style: TextStyle(fontSize: 12, color: AppColors.subtitleGrey),
+                  style: TextStyle(
+                      fontSize: 12, color: AppColors.subtitleGrey),
                 ),
                 const SizedBox(height: 12),
                 ConstrainedBox(
@@ -381,7 +387,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
                     itemBuilder: (_, index) {
                       final item = items[index];
                       final name = item['product_name'] ?? 'Insumo';
-                      final price = (item['unit_price'] as num?)?.toDouble() ?? 0.0;
+                      final price =
+                          (item['unit_price'] as num?)?.toDouble() ?? 0.0;
                       final qty = (item['quantity'] as num?)?.toInt() ?? 1;
 
                       return Padding(
@@ -392,16 +399,21 @@ class _OrdersScreenState extends State<OrdersScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  Text(name,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold)),
                                   Text('\$${price.toStringAsFixed(2)} c/u',
-                                      style: const TextStyle(fontSize: 12, color: AppColors.subtitleGrey)),
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          color: AppColors.subtitleGrey)),
                                 ],
                               ),
                             ),
                             Row(
                               children: [
                                 IconButton(
-                                  icon: const Icon(Icons.remove_circle_outline, color: Colors.red),
+                                  icon: const Icon(Icons.remove_circle_outline,
+                                      color: Colors.red),
                                   onPressed: qty > 1
                                       ? () {
                                           setModalState(() {
@@ -411,9 +423,12 @@ class _OrdersScreenState extends State<OrdersScreen> {
                                       : null,
                                 ),
                                 Text('$qty',
-                                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                    style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold)),
                                 IconButton(
-                                  icon: const Icon(Icons.add_circle_outline, color: AppColors.primaryBlue),
+                                  icon: const Icon(Icons.add_circle_outline,
+                                      color: AppColors.primaryBlue),
                                   onPressed: () {
                                     setModalState(() {
                                       item['quantity'] = qty + 1;
@@ -432,32 +447,14 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Subtotal Insumos:', style: TextStyle(color: AppColors.subtitleGrey)),
-                    Text('\$${newSubtotal.toStringAsFixed(2)}',
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Tarifa de Servicio Abasto (2%):',
-                        style: TextStyle(color: AppColors.subtitleGrey)),
-                    Text('\$${newFee.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.primaryBlue)),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Nuevo Total:',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    const Text('Total a Pagar:',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 16)),
                     Text('\$${newTotal.toStringAsFixed(2)}',
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.navyDark)),
+                        style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.navyDark)),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -465,20 +462,27 @@ class _OrdersScreenState extends State<OrdersScreen> {
                   width: double.infinity,
                   height: 44,
                   child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryBlue),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryBlue),
                     onPressed: () async {
                       try {
                         for (var it in items) {
                           await supabase
                               .from('order_items')
-                              .update({'quantity': it['quantity']})
-                              .eq('id', it['id']);
+                              .update({'quantity': it['quantity']}).eq(
+                                  'id', it['id']);
                         }
 
-                        await supabase
-                            .from('orders')
-                            .update({'total_amount': newSubtotal})
-                            .eq('id', order['id']);
+                        final double baseSubtotal = double.parse(
+                            (newTotal / 1.02).toStringAsFixed(2));
+                        final double fee =
+                            double.parse((newTotal - baseSubtotal).toStringAsFixed(2));
+
+                        await supabase.from('orders').update({
+                          'total_amount': newTotal,
+                          'subtotal': baseSubtotal,
+                          'platform_fee': fee,
+                        }).eq('id', order['id']);
 
                         Navigator.pop(ctx);
                         _refresh();
@@ -486,19 +490,24 @@ class _OrdersScreenState extends State<OrdersScreen> {
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                              content: Text('Pedido actualizado correctamente.'),
+                              content:
+                                  Text('Pedido actualizado correctamente.'),
                               backgroundColor: AppColors.tealMint,
                             ),
                           );
                         }
                       } catch (e) {
                         ScaffoldMessenger.of(ctx).showSnackBar(
-                          SnackBar(content: Text('Error al guardar: $e'), backgroundColor: Colors.red),
+                          SnackBar(
+                              content: Text('Error al guardar: $e'),
+                              backgroundColor: Colors.red),
                         );
                       }
                     },
                     child: const Text('Guardar Cambios',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold)),
                   ),
                 ),
               ],
@@ -531,7 +540,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
               children: [
                 Text(
                   'Historial: ${order['code']}',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 18),
                 ),
                 IconButton(
                   icon: const Icon(Icons.close),
@@ -543,8 +553,10 @@ class _OrdersScreenState extends State<OrdersScreen> {
             if (createdAt != null)
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.add_shopping_cart, color: Colors.orange),
-                title: const Text('Pedido Realizado (Pendiente)', style: TextStyle(fontWeight: FontWeight.bold)),
+                leading:
+                    const Icon(Icons.add_shopping_cart, color: Colors.orange),
+                title: const Text('Pedido Realizado',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: Text(
                   '${createdAt.day}/${createdAt.month}/${createdAt.year} ${createdAt.hour.toString().padLeft(2, '0')}:${createdAt.minute.toString().padLeft(2, '0')}',
                 ),
@@ -566,7 +578,9 @@ class _OrdersScreenState extends State<OrdersScreen> {
                         ? Icons.check_circle
                         : (st == 'enRuta'
                             ? Icons.local_shipping
-                            : (st == 'cancelado' ? Icons.cancel : Icons.sync)),
+                            : (st == 'cancelado'
+                                ? Icons.cancel
+                                : Icons.sync)),
                     color: _getStatusColor(st),
                   ),
                   title: Text(
@@ -590,11 +604,9 @@ class _OrdersScreenState extends State<OrdersScreen> {
   Widget _buildOrderCard(Map<String, dynamic> order) {
     final code = order['code'] ?? 'ORD-000';
     final supplierName = order['supplier_name'] ?? 'PRUEBA';
-    final subtotal = (order['total_amount'] as num?)?.toDouble() ?? 0.0;
-    
-    // Cálculo porcentual del 2%
-    final fee = subtotal * _platformFeeRate;
-    final totalConTarifa = subtotal + fee;
+    // El total_amount ya es el precio exacto final pagado por el cliente
+    final double totalFinal =
+        (order['total_amount'] as num?)?.toDouble() ?? 0.0;
 
     final status = (order['status'] ?? 'pendiente').toString();
     final items = (order['order_items'] as List<dynamic>?) ?? [];
@@ -629,11 +641,13 @@ class _OrdersScreenState extends State<OrdersScreen> {
                     const SizedBox(height: 2),
                     Row(
                       children: [
-                        const Icon(Icons.storefront, size: 14, color: AppColors.primaryBlue),
+                        const Icon(Icons.storefront,
+                            size: 14, color: AppColors.primaryBlue),
                         const SizedBox(width: 4),
                         Text(
                           supplierName,
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13),
                         ),
                       ],
                     ),
@@ -642,7 +656,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 InkWell(
                   onTap: () => _showTimelineDialog(order),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
                       color: _getStatusColor(status).withOpacity(0.12),
                       borderRadius: BorderRadius.circular(8),
@@ -659,7 +674,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
                           ),
                         ),
                         const SizedBox(width: 4),
-                        Icon(Icons.history, size: 14, color: _getStatusColor(status)),
+                        Icon(Icons.history,
+                            size: 14, color: _getStatusColor(status)),
                       ],
                     ),
                   ),
@@ -680,48 +696,36 @@ class _OrdersScreenState extends State<OrdersScreen> {
                   children: [
                     Text('$qty x $pName', style: const TextStyle(fontSize: 13)),
                     Text('\$${(qty * price).toStringAsFixed(2)}',
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w500)),
                   ],
                 ),
               );
             }),
             if (items.length > 3)
               Text('+ ${items.length - 3} insumos adicionales...',
-                  style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: AppColors.subtitleGrey)),
+                  style: const TextStyle(
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                      color: AppColors.subtitleGrey)),
 
             const Divider(height: 14),
 
-            // Desglose de precios con tarifa porcentual del 2%
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Subtotal Insumos:', style: TextStyle(fontSize: 12, color: AppColors.subtitleGrey)),
-                Text('\$${subtotal.toStringAsFixed(2)}',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
-              ],
-            ),
-            const SizedBox(height: 2),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Tarifa de Servicio Abasto (2%):',
-                    style: TextStyle(fontSize: 12, color: AppColors.subtitleGrey)),
-                Text('\$${fee.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.primaryBlue)),
-              ],
-            ),
-            const SizedBox(height: 4),
+            // Total único y transparente (sin tarifa duplicada)
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text('Total a Pagar:',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.navyDark)),
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.navyDark)),
                 Text(
-                  '\$${totalConTarifa.toStringAsFixed(2)}',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.navyDark),
+                  '\$${totalFinal.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.navyDark),
                 ),
               ],
             ),
@@ -733,10 +737,12 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 children: [
                   Expanded(
                     child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(padding: EdgeInsets.zero),
+                      style: OutlinedButton.styleFrom(
+                          padding: EdgeInsets.zero),
                       onPressed: () => _showEditOrderModal(order),
                       icon: const Icon(Icons.edit_outlined, size: 15),
-                      label: const Text('Modificar', style: TextStyle(fontSize: 12)),
+                      label: const Text('Modificar',
+                          style: TextStyle(fontSize: 12)),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -749,7 +755,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
                       ),
                       onPressed: () => _confirmCancelOrder(order),
                       icon: const Icon(Icons.cancel_outlined, size: 15),
-                      label: const Text('Cancelar', style: TextStyle(fontSize: 12)),
+                      label: const Text('Cancelar',
+                          style: TextStyle(fontSize: 12)),
                     ),
                   ),
                 ],
@@ -762,10 +769,12 @@ class _OrdersScreenState extends State<OrdersScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF4F46E5),
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
                   ),
                   icon: const Icon(Icons.payment, size: 18),
-                  label: Text('Pagar con Wompi (\$${totalConTarifa.toStringAsFixed(2)})',
+                  label: Text(
+                      'Pagar con Wompi (\$${totalFinal.toStringAsFixed(2)})',
                       style: const TextStyle(fontWeight: FontWeight.bold)),
                   onPressed: () => _payOrderWithWompi(order),
                 ),
@@ -786,7 +795,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryBlue),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryBlue),
                     onPressed: () {
                       final orderObj = OrderModel(
                         id: order['id'].toString(),
@@ -797,11 +807,14 @@ class _OrdersScreenState extends State<OrdersScreen> {
                         items: items
                             .map((i) => OrderItem(
                                   productName: i['product_name'] ?? '',
-                                  quantity: (i['quantity'] as num?)?.toInt() ?? 1,
-                                  unitPrice: (i['unit_price'] as num?)?.toDouble() ?? 0.0,
+                                  quantity:
+                                      (i['quantity'] as num?)?.toInt() ?? 1,
+                                  unitPrice:
+                                      (i['unit_price'] as num?)?.toDouble() ??
+                                          0.0,
                                 ))
                             .toList(),
-                        totalAmount: totalConTarifa,
+                        totalAmount: totalFinal,
                         status: status == 'enRuta'
                             ? OrderStatus.enRuta
                             : (status == 'entregado'
@@ -813,12 +826,15 @@ class _OrdersScreenState extends State<OrdersScreen> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => OrderChatScreen(order: orderObj),
+                          builder: (context) =>
+                              OrderChatScreen(order: orderObj),
                         ),
                       );
                     },
-                    icon: const Icon(Icons.chat_bubble_outline, color: Colors.white, size: 16),
-                    label: const Text('Chat', style: TextStyle(color: Colors.white)),
+                    icon: const Icon(Icons.chat_bubble_outline,
+                        color: Colors.white, size: 16),
+                    label: const Text('Chat',
+                        style: TextStyle(color: Colors.white)),
                   ),
                 ),
               ],
@@ -877,7 +893,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(20),
-                child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.red)),
+                child: Text('Error: ${snapshot.error}',
+                    style: const TextStyle(color: Colors.red)),
               ),
             );
           }
@@ -888,9 +905,11 @@ class _OrdersScreenState extends State<OrdersScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: const [
-                  Icon(Icons.shopping_bag_outlined, size: 64, color: Colors.grey),
+                  Icon(Icons.shopping_bag_outlined,
+                      size: 64, color: Colors.grey),
                   SizedBox(height: 12),
-                  Text('No tienes pedidos en curso.', style: TextStyle(color: AppColors.subtitleGrey)),
+                  Text('No tienes pedidos en curso.',
+                      style: TextStyle(color: AppColors.subtitleGrey)),
                 ],
               ),
             );
@@ -905,15 +924,18 @@ class _OrdersScreenState extends State<OrdersScreen> {
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 1200),
                     child: GridView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 20),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 2,
                         crossAxisSpacing: 18,
                         mainAxisSpacing: 18,
-                        mainAxisExtent: 410,
+                        mainAxisExtent: 380,
                       ),
                       itemCount: orders.length,
-                      itemBuilder: (context, index) => _buildOrderCard(orders[index]),
+                      itemBuilder: (context, index) =>
+                          _buildOrderCard(orders[index]),
                     ),
                   ),
                 );
@@ -923,7 +945,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 padding: const EdgeInsets.all(14),
                 itemCount: orders.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (context, index) => _buildOrderCard(orders[index]),
+                itemBuilder: (context, index) =>
+                    _buildOrderCard(orders[index]),
               );
             },
           );

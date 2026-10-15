@@ -23,7 +23,8 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
   final Map<String, int> _selectedQuantities = {};
   bool _isSubmitting = false;
 
-  static const double _platformFeeRate = 0.02; // Tarifa 2% Abasto
+  // Tarifa del 2% integrada al precio de cara al restaurante
+  static const double _platformFeeRate = 0.02;
 
   final TextEditingController _searchCtrl = TextEditingController();
   String _selectedCategory = 'Todos';
@@ -49,9 +50,17 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
         .eq('is_available', true)
         .order('name', ascending: true);
 
-    final list = (response as List<dynamic>)
-        .map((p) => Product.fromMap(p as Map<String, dynamic>))
-        .toList();
+    final list = (response as List<dynamic>).map((p) {
+      final baseMap = Map<String, dynamic>.from(p as Map<String, dynamic>);
+      final double basePrice = (baseMap['price'] as num?)?.toDouble() ?? 0.0;
+
+      // El precio para el restaurante ya incluye la tarifa del 2%
+      final double customerPrice =
+          double.parse((basePrice * (1 + _platformFeeRate)).toStringAsFixed(2));
+      baseMap['price'] = customerPrice;
+
+      return Product.fromMap(baseMap);
+    }).toList();
 
     _allProducts = list;
     _filteredProducts = list;
@@ -75,7 +84,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     });
   }
 
-  double _calculateSubtotal() {
+  double _calculateTotal() {
     double total = 0.0;
     for (var product in _allProducts) {
       final qty = _selectedQuantities[product.id] ?? 0;
@@ -101,7 +110,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     );
   }
 
-  Future<void> _submitOrder(double subtotal) async {
+  Future<void> _submitOrder(double totalAmount) async {
     setState(() => _isSubmitting = true);
     try {
       final restaurantId =
@@ -112,10 +121,15 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
       final initialHistory = [
         {
           'status': 'pendiente',
-          'changed_at': DateTime.now().toIso8601String(),
+          'changed_at': DateTime.now().toUtc().toIso8601String(),
           'note': 'Pedido emitido por el restaurante',
         }
       ];
+
+      final double subtotalInsumos =
+          double.parse((totalAmount / (1 + _platformFeeRate)).toStringAsFixed(2));
+      final double feeAbasto =
+          double.parse((totalAmount - subtotalInsumos).toStringAsFixed(2));
 
       Map<String, dynamic> orderInsert;
       try {
@@ -123,7 +137,9 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
           'code': orderCode,
           'restaurant_id': restaurantId,
           'supplier_id': widget.supplier.id,
-          'total_amount': subtotal,
+          'total_amount': totalAmount,
+          'subtotal': subtotalInsumos,
+          'platform_fee': feeAbasto,
           'status': 'pendiente',
           'status_history': initialHistory,
           'is_financed': false,
@@ -134,7 +150,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
           'code': orderCode,
           'restaurant_id': restaurantId,
           'supplier_id': widget.supplier.id,
-          'total_amount': subtotal,
+          'total_amount': totalAmount,
           'status': 'pendiente',
           'is_financed': false,
           'installments_count': 1,
@@ -161,7 +177,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('¡Pedido $orderCode emitido como Pendiente!'),
+            content: Text('¡Pedido $orderCode emitido exitosamente!'),
             backgroundColor: AppColors.tealMint,
             behavior: SnackBarBehavior.floating,
           ),
@@ -184,7 +200,6 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     }
   }
 
-  // Modal / Sección del Carrito de Compras
   void _openCartModal() {
     showModalBottomSheet(
       context: context,
@@ -196,12 +211,10 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
               .where((p) => (_selectedQuantities[p.id] ?? 0) > 0)
               .toList();
 
-          double currentSubtotal = 0.0;
+          double currentTotal = 0.0;
           for (var p in selectedProducts) {
-            currentSubtotal += (_selectedQuantities[p.id] ?? 0) * p.price;
+            currentTotal += (_selectedQuantities[p.id] ?? 0) * p.price;
           }
-          final double fee = currentSubtotal * _platformFeeRate;
-          final double totalWithFee = currentSubtotal + fee;
 
           return Container(
             decoration: const BoxDecoration(
@@ -284,7 +297,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           child: Row(
                             children: [
-                              _buildProductThumbnail(product.imageUrl),
+                              _buildCartThumbnail(product.imageUrl),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Column(
@@ -345,7 +358,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                                 ],
                               ),
                               SizedBox(
-                                width: 55,
+                                width: 60,
                                 child: Text(
                                   '\$${itemTotal.toStringAsFixed(2)}',
                                   textAlign: TextAlign.end,
@@ -364,60 +377,29 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
 
                 const Divider(height: 20),
 
-                // Resumen Financiero con Comisión del 2%
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: const Color(0xFFF8FAFC),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: const Color(0xFFE2E8F0)),
                   ),
-                  child: Column(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('Subtotal Insumos:',
-                              style: TextStyle(
-                                  fontSize: 13, color: AppColors.subtitleGrey)),
-                          Text('\$${currentSubtotal.toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                  fontSize: 13, fontWeight: FontWeight.w600)),
-                        ],
+                      const Text(
+                        'Total a Pagar:',
+                        style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.navyDark),
                       ),
-                      const SizedBox(height: 4),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('Tarifa de Servicio Abasto (2%):',
-                              style: TextStyle(
-                                  fontSize: 13, color: AppColors.subtitleGrey)),
-                          Text('\$${fee.toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.primaryBlue)),
-                        ],
-                      ),
-                      const Divider(height: 14),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text(
-                            'Total a Pagar:',
-                            style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.navyDark),
-                          ),
-                          Text(
-                            '\$${totalWithFee.toStringAsFixed(2)}',
-                            style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.navyDark),
-                          ),
-                        ],
+                      Text(
+                        '\$${currentTotal.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.navyDark),
                       ),
                     ],
                   ),
@@ -439,11 +421,11 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                         ? null
                         : () {
                             Navigator.pop(ctx);
-                            _submitOrder(currentSubtotal);
+                            _submitOrder(currentTotal);
                           },
                     icon: const Icon(Icons.check_circle_outline, size: 20),
                     label: Text(
-                      'Confirmar Pedido (\$${totalWithFee.toStringAsFixed(2)})',
+                      'Confirmar Pedido (\$${currentTotal.toStringAsFixed(2)})',
                       style: const TextStyle(
                           fontSize: 15, fontWeight: FontWeight.bold),
                     ),
@@ -588,44 +570,201 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     );
   }
 
-  Widget _buildProductThumbnail(String? imageUrl) {
+  Widget _buildCartThumbnail(String? imageUrl) {
     if (imageUrl != null && imageUrl.isNotEmpty) {
       return ClipRRect(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
         child: Image.network(
           imageUrl,
-          width: 58,
-          height: 58,
+          width: 48,
+          height: 48,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => _buildFallbackThumbnail(),
+          errorBuilder: (_, __, ___) => _buildCartFallback(),
         ),
       );
     }
-    return _buildFallbackThumbnail();
+    return _buildCartFallback();
   }
 
-  Widget _buildFallbackThumbnail() {
+  Widget _buildCartFallback() {
     return Container(
-      width: 58,
-      height: 58,
+      width: 48,
+      height: 48,
       decoration: BoxDecoration(
         color: AppColors.primaryBlue.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
       ),
-      child: const Icon(
-        Icons.inventory_2_outlined,
-        color: AppColors.primaryBlue,
-        size: 28,
+      child: const Icon(Icons.inventory_2_outlined, color: AppColors.primaryBlue, size: 24),
+    );
+  }
+
+  // Tarjeta de Insumo con altura fija protegida para evitar overflow
+  Widget _buildGridProductCard(Product product) {
+    final qty = _selectedQuantities[product.id] ?? 0;
+    final bool hasSelection = qty > 0;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: hasSelection ? AppColors.primaryBlue : const Color(0xFFE2E8F0),
+          width: hasSelection ? 1.8 : 1.0,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // 1. Imagen Superior (se adapta dinámicamente)
+          Expanded(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
+                  child: (product.imageUrl != null && product.imageUrl!.isNotEmpty)
+                      ? Image.network(
+                          product.imageUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                            color: const Color(0xFFF1F5F9),
+                            child: const Icon(Icons.inventory_2_outlined, color: AppColors.primaryBlue, size: 36),
+                          ),
+                        )
+                      : Container(
+                          color: const Color(0xFFF1F5F9),
+                          child: const Icon(Icons.inventory_2_outlined, color: AppColors.primaryBlue, size: 36),
+                        ),
+                ),
+                if (hasSelection)
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryBlue,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '$qty en carrito',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          // 2. Información y Controles (bloque inferior con tamaño ajustado)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  product.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: AppColors.navyDark,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${product.category} • ${product.unit}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: AppColors.subtitleGrey,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '\$${product.price.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                    color: AppColors.primaryBlue,
+                  ),
+                ),
+                const SizedBox(height: 6),
+
+                // Selector de cantidad
+                Container(
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      IconButton(
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        iconSize: 16,
+                        icon: const Icon(Icons.remove, color: Colors.red),
+                        onPressed: qty > 0
+                            ? () {
+                                setState(() {
+                                  _selectedQuantities[product.id] = qty - 1;
+                                });
+                              }
+                            : null,
+                      ),
+                      Text(
+                        '$qty',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.navyDark,
+                        ),
+                      ),
+                      IconButton(
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        iconSize: 16,
+                        icon: const Icon(Icons.add, color: AppColors.primaryBlue),
+                        onPressed: () {
+                          setState(() {
+                            _selectedQuantities[product.id] = qty + 1;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final currentSubtotal = _calculateSubtotal();
+    final currentTotal = _calculateTotal();
     final totalItems = _totalItemsCount();
 
     return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: Text(widget.supplier.name),
         actions: [
@@ -667,9 +806,12 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                   decoration: InputDecoration(
                     hintText: 'Buscar insumo en ${widget.supplier.name}...',
                     prefixIcon: const Icon(Icons.search, size: 20),
+                    filled: true,
+                    fillColor: Colors.white,
                     contentPadding: const EdgeInsets.symmetric(vertical: 8),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: Colors.grey.shade300),
                     ),
                   ),
                 ),
@@ -708,6 +850,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
 
               const SizedBox(height: 6),
 
+              // Grid con relación de aspecto calculada para que nunca desborde
               Expanded(
                 child: _filteredProducts.isEmpty
                     ? Center(
@@ -716,118 +859,43 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                           style: TextStyle(color: Colors.grey.shade600),
                         ),
                       )
-                    : ListView.separated(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 8),
-                        itemCount: _filteredProducts.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 10),
-                        itemBuilder: (context, index) {
-                          final product = _filteredProducts[index];
-                          final qty = _selectedQuantities[product.id] ?? 0;
+                    : LayoutBuilder(
+                        builder: (context, constraints) {
+                          int crossAxisCount = 2;
+                          double aspectRatio = 0.70;
 
-                          return Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.grey.shade200),
+                          if (constraints.maxWidth > 1150) {
+                            crossAxisCount = 5;
+                            aspectRatio = 0.72;
+                          } else if (constraints.maxWidth > 850) {
+                            crossAxisCount = 4;
+                            aspectRatio = 0.70;
+                          } else if (constraints.maxWidth > 600) {
+                            crossAxisCount = 3;
+                            aspectRatio = 0.68;
+                          }
+
+                          return GridView.builder(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 8),
+                            gridDelegate:
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: crossAxisCount,
+                              crossAxisSpacing: 12,
+                              mainAxisSpacing: 12,
+                              childAspectRatio: aspectRatio,
                             ),
-                            padding: const EdgeInsets.all(10),
-                            child: Row(
-                              children: [
-                                _buildProductThumbnail(product.imageUrl),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        product.name,
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 15,
-                                          color: AppColors.navyDark,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 3),
-                                      Text(
-                                        '${product.category} • ${product.unit}',
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          color: AppColors.subtitleGrey,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '\$${product.price.toStringAsFixed(2)}',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 15,
-                                          color: AppColors.primaryBlue,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Container(
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey.shade50,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                        color: Colors.grey.shade200),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        iconSize: 18,
-                                        splashRadius: 20,
-                                        icon: const Icon(
-                                            Icons.remove_circle_outline),
-                                        onPressed: qty > 0
-                                            ? () {
-                                                setState(() {
-                                                  _selectedQuantities[
-                                                      product.id] = qty - 1;
-                                                });
-                                              }
-                                            : null,
-                                      ),
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 4),
-                                        child: Text(
-                                          '$qty',
-                                          style: const TextStyle(
-                                            fontSize: 15,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      IconButton(
-                                        iconSize: 18,
-                                        splashRadius: 20,
-                                        icon: const Icon(
-                                            Icons.add_circle_outline),
-                                        onPressed: () {
-                                          setState(() {
-                                            _selectedQuantities[product.id] =
-                                                qty + 1;
-                                          });
-                                        },
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
+                            itemCount: _filteredProducts.length,
+                            itemBuilder: (context, index) {
+                              return _buildGridProductCard(_filteredProducts[index]);
+                            },
                           );
                         },
                       ),
               ),
 
-              // Barra inferior interactiva de Carrito
-              if (currentSubtotal > 0)
+              // Barra inferior interactiva con Total Integrado
+              if (currentTotal > 0)
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
@@ -873,7 +941,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  'Subtotal: \$${currentSubtotal.toStringAsFixed(2)}',
+                                  'Total: \$${currentTotal.toStringAsFixed(2)}',
                                   style: const TextStyle(
                                     fontSize: 18,
                                     fontWeight: FontWeight.bold,
