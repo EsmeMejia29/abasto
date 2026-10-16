@@ -60,7 +60,7 @@ class _RestaurantOnboardingScreenState
   ];
 
   final _restaurantAddressCtrl =
-      TextEditingController(text: 'Mauritas, Paseo el Carmen');
+      TextEditingController(text: 'Paseo el Carmen');
   bool _sameAddressForDelivery = true;
   final _deliveryAddressCtrl = TextEditingController();
   final _deliveryInstructionsCtrl = TextEditingController(
