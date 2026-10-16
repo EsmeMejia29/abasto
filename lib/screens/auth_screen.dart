@@ -196,9 +196,9 @@ class _AuthScreenState extends State<AuthScreen> {
   // 2. FLUJO EXCLUSIVO DE REGISTRO
   // ========================================================
   Future<void> _submitRegister() async {
-    // Si estamos en mobile toma del formulario móvil, si es desktop toma del controlador de registro
-    final email = (_isLogin ? _emailCtrl.text : _regEmailCtrl.text.isEmpty ? _emailCtrl.text : _regEmailCtrl.text).trim();
-    final password = (_isLogin ? _passwordCtrl.text : _regPasswordCtrl.text.isEmpty ? _passwordCtrl.text : _regPasswordCtrl.text).trim();
+    // Si _regEmailCtrl tiene texto (escritorio), úsalo; si está vacío, toma _emailCtrl (móvil)
+    final email = (_regEmailCtrl.text.isNotEmpty ? _regEmailCtrl.text : _emailCtrl.text).trim();
+    final password = (_regPasswordCtrl.text.isNotEmpty ? _regPasswordCtrl.text : _passwordCtrl.text).trim();
     final businessName = _regBusinessNameCtrl.text.trim();
 
     if (email.isEmpty || password.isEmpty || businessName.isEmpty) {
@@ -273,6 +273,7 @@ class _AuthScreenState extends State<AuthScreen> {
           _passwordCtrl.clear();
           _regPasswordCtrl.clear();
           _regBusinessNameCtrl.clear();
+          _regEmailCtrl.clear();
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -313,6 +314,7 @@ class _AuthScreenState extends State<AuthScreen> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
+  
 
   // --- Formulario de Iniciar Sesión ---
   Widget _buildLoginForm({bool isDesktop = false}) {

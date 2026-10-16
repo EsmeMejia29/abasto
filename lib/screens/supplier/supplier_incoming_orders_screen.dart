@@ -1,5 +1,8 @@
+import 'dart:ui_web' as ui_web;
+import 'dart:html' as html;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../main.dart';
 import '../../models/order.dart';
 import '../../theme/app_theme.dart';
@@ -87,7 +90,6 @@ class _SupplierIncomingOrdersScreenState
   }
 
   Future<List<Map<String, dynamic>>> _fetchOrders() async {
-    // 1. Obtener órdenes ya transferidas / liquidadas en supplier_payouts
     try {
       final paidRes = await supabase
           .from('supplier_payouts')
@@ -104,7 +106,6 @@ class _SupplierIncomingOrdersScreenState
       debugPrint("Error obteniendo pagos liquidados: $e");
     }
 
-    // 2. Obtener órdenes del distribuidor
     final res = await supabase
         .from('orders')
         .select('''
@@ -182,28 +183,52 @@ class _SupplierIncomingOrdersScreenState
         o['restaurant_email'] =
             prof?['email'] ?? det?['email'] ?? 'Sin correo registrado';
 
-        // 5. Teléfono
-        o['restaurant_phone'] = det?['contact_phone'] ??
-            prof?['phone'] ??
-            'Sin teléfono registrado';
+        // 5. Dirección Comercial y Dirección de Entrega
+        o['restaurant_address'] = prof?['address'] ??
+            det?['restaurant_address'] ??
+            det?['delivery_address'] ??
+            'Sin dirección física registrada';
 
-        // 6. Dirección
-        o['restaurant_address'] = det?['delivery_address'] ??
+        o['delivery_address'] = det?['delivery_address'] ??
             prof?['address'] ??
-            'Sin dirección registrada';
+            det?['restaurant_address'] ??
+            o['restaurant_address'];
 
-        // 7. Enlace / Redes
+        // 6. Zona / Municipio
+        o['delivery_zone'] = det?['delivery_zone'] ??
+            prof?['location'] ??
+            'Área Metropolitana';
+
+        // 7. Instrucciones para repartidor
+        o['delivery_instructions'] = det?['delivery_instructions'] ??
+            'Entrada de proveedores por portón lateral de servicio';
+
+        // 8. Coordenadas de GPS
+        final latRaw = det?['delivery_latitude'];
+        final lngRaw = det?['delivery_longitude'];
+        o['delivery_latitude'] =
+            latRaw != null ? double.tryParse(latRaw.toString()) : null;
+        o['delivery_longitude'] =
+            lngRaw != null ? double.tryParse(lngRaw.toString()) : null;
+
+        // 9. Enlace / Redes
         o['restaurant_website'] = prof?['website'] ?? det?['website'];
 
-        // 8. Horarios de atención
+        // 10. Horario de Recepción y Atención
+        o['delivery_window'] = det?['delivery_window'] ??
+            prof?['business_hours'] ??
+            'Mañanas (7:00 AM - 11:00 AM)';
         o['business_hours'] = prof?['business_hours'] ??
             det?['business_hours'] ??
             'Lunes a Sábado: 7:00 AM - 5:00 PM';
 
-        // 9. Sucursales
+        // 11. Giro / Especialidad
+        o['restaurant_type'] = det?['restaurant_type'] ?? 'Restaurante';
+
+        // 12. Sucursales
         o['branch_count'] = det?['branch_count']?.toString() ?? '1';
 
-        // 10. Verificación
+        // 13. Verificación
         o['is_verified'] =
             prof?['is_verified'] == true || det?['is_verified'] == true;
       }
@@ -289,7 +314,6 @@ class _SupplierIncomingOrdersScreenState
     }
   }
 
-  // Componente de Cartera: Calcula el saldo pendiente excluyendo lo ya liquidado por Admin
   Widget _buildWalletCard(List<Map<String, dynamic>> allOrders) {
     double totalPorLiquidar = 0.0;
 
@@ -297,7 +321,6 @@ class _SupplierIncomingOrdersScreenState
       final st = (ord['status'] ?? '').toString().toLowerCase();
       final ordId = ord['id'].toString();
 
-      // Solo pedidos entregados y que aún NO hayan sido transferidos por Admin
       if (st == 'entregado' && !_paidOrderIds.contains(ordId)) {
         final subtotal = (ord['total_amount'] as num?)?.toDouble() ?? 0.0;
         final commission = subtotal * _supplierCommissionRate;
@@ -418,18 +441,12 @@ class _SupplierIncomingOrdersScreenState
     );
   }
 
-  void _showRestaurantProfileModal(Map<String, dynamic> order) {
-    final rName = order['restaurant_name'] ?? 'Restaurante';
-    final rNit = order['restaurant_nit'] ?? 'Sin NIT / NRC registrado';
-    final rEmail = order['restaurant_email'] ?? 'Sin correo registrado';
-    final rPhone = order['restaurant_phone'] ?? 'Sin teléfono registrado';
-    final rAddress = order['restaurant_address'] ?? 'Sin dirección registrada';
-    final rWebsite = order['restaurant_website']?.toString().trim();
-    final rHours =
-        order['business_hours'] ?? 'Lunes a Sábado: 7:00 AM - 5:00 PM';
-    final branches = order['branch_count'] ?? '1';
-    final rAvatar = order['restaurant_avatar']?.toString().trim();
-    final bool isVerified = order['is_verified'] == true;
+  // MODAL PARA VER LA LISTA COMPLETA DE INSUMOS SOLICITADOS
+  void _showAllItemsModal(Map<String, dynamic> order) {
+    final code = order['code'] ?? 'Pedido';
+    final restaurantName = order['restaurant_name'] ?? 'Restaurante';
+    final items = (order['order_items'] as List<dynamic>?) ?? [];
+    final totalFacturado = (order['total_amount'] as num?)?.toDouble() ?? 0.0;
 
     showModalBottomSheet(
       context: context,
@@ -439,9 +456,252 @@ class _SupplierIncomingOrdersScreenState
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.65,
+        initialChildSize: 0.72,
         minChildSize: 0.45,
-        maxChildSize: 0.9,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (_, scrollController) => Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 20, 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryBlue.withOpacity(0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.shopping_basket_outlined,
+                            color: AppColors.primaryBlue, size: 20),
+                      ),
+                      const SizedBox(width: 10),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Insumos: $code',
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.navyDark,
+                            ),
+                          ),
+                          Text(
+                            'Cliente: $restaurantName • ${items.length} producto(s)',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppColors.subtitleGrey,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: ListView.separated(
+                controller: scrollController,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                itemCount: items.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (context, index) {
+                  final it = items[index];
+                  final name = it['product_name'] ?? 'Producto';
+                  final qty = it['quantity'] ?? 1;
+
+                  // Precio unitario registrado en la orden (incluye el 2%)
+                  final precioUnitario =
+                      (it['unit_price'] as num?)?.toDouble() ?? 0.0;
+
+                  // Precio original sin el 2%
+                  final precioOriginal = (precioUnitario / 1.02);
+                  final totalItem = qty * precioUnitario;
+
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: Text(
+                            '${qty}x',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                              color: AppColors.primaryBlue,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                name,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                  color: AppColors.navyDark,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Wrap(
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  Text(
+                                    'Original: \$${precioOriginal.toStringAsFixed(2)}',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                      color: AppColors.navyDark,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 5, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFEFF6FF),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      '+2% Abasto',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppColors.primaryBlue,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    '(\$${precioUnitario.toStringAsFixed(2)} c/u)',
+                                    style: const TextStyle(
+                                      fontSize: 11.5,
+                                      color: AppColors.subtitleGrey,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        Text(
+                          '\$${totalItem.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14.5,
+                            color: AppColors.navyDark,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                border: Border(top: BorderSide(color: Colors.grey.shade200)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Total del Pedido:',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.navyDark,
+                    ),
+                  ),
+                  Text(
+                    '\$${totalFacturado.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showRestaurantProfileModal(Map<String, dynamic> order) {
+    final rName = order['restaurant_name'] ?? 'Restaurante';
+    final rNit = order['restaurant_nit'] ?? 'Sin NIT / NRC registrado';
+    final rEmail = order['restaurant_email'] ?? 'Sin correo registrado';
+    final rAddress = order['restaurant_address'] ?? 'Sin dirección registrada';
+    final rDeliveryAddress = order['delivery_address'] ?? rAddress;
+    final rZone = order['delivery_zone'] ?? 'Área Metropolitana';
+    final rDeliveryInstructions = order['delivery_instructions'] ?? 'Sin notas';
+    final rDeliveryWindow =
+        order['delivery_window'] ?? 'Mañanas (7:00 AM - 11:00 AM)';
+    final rType = order['restaurant_type'] ?? 'Restaurante';
+    final rWebsite = order['restaurant_website']?.toString().trim();
+    final branches = order['branch_count'] ?? '1';
+    final rAvatar = order['restaurant_avatar']?.toString().trim();
+    final bool isVerified = order['is_verified'] == true;
+
+    final double? rLat = order['delivery_latitude'];
+    final double? rLng = order['delivery_longitude'];
+    final bool hasCoordinates = rLat != null && rLng != null;
+
+    final String mapQuery = hasCoordinates
+        ? '$rLat,$rLng'
+        : Uri.encodeComponent('$rDeliveryAddress, $rZone, El Salvador');
+
+    final String mapIframeId =
+        'supplier-order-map-${order['id']}-${DateTime.now().millisecondsSinceEpoch}';
+
+    ui_web.platformViewRegistry.registerViewFactory(mapIframeId, (int viewId) {
+      final iframe = html.IFrameElement()
+        ..src =
+            'https://maps.google.com/maps?q=$mapQuery&t=&z=15&ie=UTF8&iwloc=&output=embed'
+        ..style.border = '0'
+        ..style.width = '100%'
+        ..style.height = '100%'
+        ..allowFullscreen = false;
+      return iframe;
+    });
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.85,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
         expand: false,
         builder: (_, scrollController) => ListView(
           controller: scrollController,
@@ -452,11 +712,11 @@ class _SupplierIncomingOrdersScreenState
               children: [
                 Row(
                   children: const [
-                    Icon(Icons.badge_outlined,
+                    Icon(Icons.local_shipping,
                         color: AppColors.primaryBlue, size: 22),
                     SizedBox(width: 8),
                     Text(
-                      'Ficha del Restaurante',
+                      'Hoja de Reparto y Cliente',
                       style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
@@ -470,7 +730,9 @@ class _SupplierIncomingOrdersScreenState
                 ),
               ],
             ),
-            const Divider(height: 20),
+            const Divider(height: 18),
+
+            // Encabezado del Comercio
             Row(
               children: [
                 CircleAvatar(
@@ -508,9 +770,9 @@ class _SupplierIncomingOrdersScreenState
                           ],
                         ],
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 3),
                       Text(
-                        'Cliente comercial • $branches sucursal(es)',
+                        '$rType • $branches sucursal(es)',
                         style: const TextStyle(
                             fontSize: 12, color: AppColors.subtitleGrey),
                       ),
@@ -519,9 +781,158 @@ class _SupplierIncomingOrdersScreenState
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-            const Divider(height: 1),
-            const SizedBox(height: 10),
+            const SizedBox(height: 18),
+
+            // BOTÓN DE RUTA DE NAVEGACIÓN DIRECTA
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E293B),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                icon: const Icon(Icons.navigation,
+                    size: 16, color: Color(0xFF38BDF8)),
+                label: const Text(
+                  'Ruta en Google Maps',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                onPressed: () async {
+                  final url = Uri.parse(hasCoordinates
+                      ? 'https://www.google.com/maps/dir/?api=1&destination=$rLat,$rLng'
+                      : 'https://www.google.com/maps/dir/?api=1&destination=${Uri.encodeComponent('$rDeliveryAddress, $rZone, El Salvador')}');
+                  if (await canLaunchUrl(url)) {
+                    await launchUrl(url, mode: LaunchMode.externalApplication);
+                  }
+                },
+              ),
+            ),
+            const SizedBox(height: 18),
+
+            // VISOR DE GOOGLE MAPS EMBEBIDO
+            const Text(
+              'Ubicación en Mapa para Entrega:',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: AppColors.navyDark,
+              ),
+            ),
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                height: 200,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                ),
+                child: HtmlElementView(viewType: mapIframeId),
+              ),
+            ),
+            const SizedBox(height: 18),
+
+            // TARJETA DE DATOS LOGÍSTICOS
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.location_on,
+                          color: Colors.redAccent, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Punto y Dirección de Entrega',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    color: AppColors.subtitleGrey,
+                                    fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 2),
+                            Text(rDeliveryAddress,
+                                style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.navyDark)),
+                            Text('Zona: $rZone',
+                                style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.primaryBlue,
+                                    fontWeight: FontWeight.w500)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 16),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.notes,
+                          color: Colors.blueGrey, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Instrucciones para Repartidor',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    color: AppColors.subtitleGrey,
+                                    fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 2),
+                            Text(rDeliveryInstructions,
+                                style: const TextStyle(
+                                    fontSize: 13, color: AppColors.navyDark)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 16),
+                  Row(
+                    children: [
+                      const Icon(Icons.schedule, color: Colors.orange, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Horario de Descarga en Cocina',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    color: AppColors.subtitleGrey,
+                                    fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 2),
+                            Text(rDeliveryWindow,
+                                style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.navyDark)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            // DATOS FISCALES Y DE CONTACTO
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const CircleAvatar(
@@ -529,29 +940,16 @@ class _SupplierIncomingOrdersScreenState
                 child: Icon(Icons.receipt_long,
                     color: Color(0xFFD97706), size: 20),
               ),
-              title: const Text('NRC / NIT',
-                  style:
-                      TextStyle(fontSize: 12, color: AppColors.subtitleGrey)),
+              title: const Text('NRC / NIT para Facturación / DTE',
+                  style: TextStyle(
+                      fontSize: 11, color: AppColors.subtitleGrey)),
               subtitle: Text(
                 rNit,
                 style: const TextStyle(
-                    fontSize: 15,
+                    fontSize: 14,
                     fontWeight: FontWeight.w600,
                     color: AppColors.navyDark),
               ),
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const CircleAvatar(
-                backgroundColor: Color(0xFFECFDF5),
-                child: Icon(Icons.phone, color: Color(0xFF10B981), size: 20),
-              ),
-              title: const Text('Teléfono de Contacto',
-                  style:
-                      TextStyle(fontSize: 12, color: AppColors.subtitleGrey)),
-              subtitle: Text(rPhone,
-                  style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w600)),
             ),
             ListTile(
               contentPadding: EdgeInsets.zero,
@@ -561,37 +959,11 @@ class _SupplierIncomingOrdersScreenState
                     color: Color(0xFF475569), size: 20),
               ),
               title: const Text('Correo Electrónico',
-                  style:
-                      TextStyle(fontSize: 12, color: AppColors.subtitleGrey)),
+                  style: TextStyle(
+                      fontSize: 11, color: AppColors.subtitleGrey)),
               subtitle: Text(rEmail,
                   style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w500)),
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const CircleAvatar(
-                backgroundColor: Color(0xFFFEF3C7),
-                child: Icon(Icons.access_time, color: Colors.orange, size: 20),
-              ),
-              title: const Text('Horario de Recepción',
-                  style:
-                      TextStyle(fontSize: 12, color: AppColors.subtitleGrey)),
-              subtitle: Text(rHours,
-                  style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w500)),
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const CircleAvatar(
-                backgroundColor: Color(0xFFFEF2F2),
-                child: Icon(Icons.location_on, color: Colors.redAccent, size: 20),
-              ),
-              title: const Text('Dirección de Entrega',
-                  style:
-                      TextStyle(fontSize: 12, color: AppColors.subtitleGrey)),
-              subtitle: Text(rAddress,
-                  style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w500)),
+                      fontSize: 13, fontWeight: FontWeight.w500)),
             ),
             if (rWebsite != null && rWebsite.isNotEmpty)
               ListTile(
@@ -602,12 +974,12 @@ class _SupplierIncomingOrdersScreenState
                 ),
                 title: const Text('Redes / Web',
                     style: TextStyle(
-                        fontSize: 12, color: AppColors.subtitleGrey)),
+                        fontSize: 11, color: AppColors.subtitleGrey)),
                 subtitle: Text(rWebsite,
                     style: const TextStyle(
                         fontSize: 13, fontWeight: FontWeight.w500)),
               ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
           ],
         ),
       ),
@@ -720,7 +1092,7 @@ class _SupplierIncomingOrdersScreenState
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: const Text(
-                                'Ver Cliente',
+                                'Ver Ficha y Mapa',
                                 style: TextStyle(
                                   fontSize: 10,
                                   fontWeight: FontWeight.bold,
@@ -753,30 +1125,70 @@ class _SupplierIncomingOrdersScreenState
               ],
             ),
             const Divider(height: 16),
-            const Text(
-              'Insumos solicitados:',
-              style: TextStyle(
-                  fontSize: 11,
-                  color: AppColors.subtitleGrey,
-                  fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 3),
-            ...items.take(2).map((it) {
-              final pName = it['product_name'] ?? 'Insumo';
-              final qty = it['quantity'] ?? 1;
-              return Text('• $qty x $pName',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12.5, height: 1.25));
-            }),
-            if (items.length > 2)
-              Text(
-                '+ ${items.length - 2} insumos más...',
-                style: const TextStyle(
-                    fontSize: 11,
-                    fontStyle: FontStyle.italic,
-                    color: AppColors.subtitleGrey),
+
+            // SECCIÓN CLICKEABLE DE INSUMOS SOLICITADOS
+            InkWell(
+              onTap: () => _showAllItemsModal(order),
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Insumos solicitados:',
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: AppColors.subtitleGrey,
+                              fontWeight: FontWeight.bold),
+                        ),
+                        Row(
+                          children: const [
+                            Text(
+                              'Ver lista',
+                              style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.primaryBlue),
+                            ),
+                            SizedBox(width: 2),
+                            Icon(Icons.open_in_new,
+                                size: 11, color: AppColors.primaryBlue),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    ...items.take(2).map((it) {
+                      final pName = it['product_name'] ?? 'Insumo';
+                      final qty = it['quantity'] ?? 1;
+                      return Text('• $qty x $pName',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12.5, height: 1.25));
+                    }),
+                    if (items.length > 2)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          '+ ${items.length - 2} insumos más (toca para ver todos)',
+                          style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.primaryBlue),
+                        ),
+                      ),
+                  ],
+                ),
               ),
+            ),
             const Divider(height: 14),
 
             // Desglose de liquidación por orden
@@ -784,9 +1196,11 @@ class _SupplierIncomingOrdersScreenState
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text('Venta bruta:',
-                    style: TextStyle(fontSize: 12, color: AppColors.subtitleGrey)),
+                    style: TextStyle(
+                        fontSize: 12, color: AppColors.subtitleGrey)),
                 Text('\$${subtotal.toStringAsFixed(2)}',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w500)),
               ],
             ),
             const SizedBox(height: 2),
@@ -794,7 +1208,8 @@ class _SupplierIncomingOrdersScreenState
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text('Uso Abasto (5%):',
-                    style: TextStyle(fontSize: 12, color: AppColors.subtitleGrey)),
+                    style: TextStyle(
+                        fontSize: 12, color: AppColors.subtitleGrey)),
                 Text('-\$${commission.toStringAsFixed(2)}',
                     style: TextStyle(
                         fontSize: 12,
@@ -822,14 +1237,15 @@ class _SupplierIncomingOrdersScreenState
               ],
             ),
 
-            // Estado de Liquidación Bancaria de la orden
             if (status.toLowerCase() == 'entregado') ...[
               const SizedBox(height: 6),
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isLiquidado ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                  color: isLiquidado
+                      ? const Color(0xFFDCFCE7)
+                      : const Color(0xFFFEF3C7),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Row(
@@ -838,15 +1254,21 @@ class _SupplierIncomingOrdersScreenState
                     Icon(
                       isLiquidado ? Icons.check_circle : Icons.schedule,
                       size: 14,
-                      color: isLiquidado ? const Color(0xFF16A34A) : const Color(0xFFB45309),
+                      color: isLiquidado
+                          ? const Color(0xFF16A34A)
+                          : const Color(0xFFB45309),
                     ),
                     const SizedBox(width: 5),
                     Text(
-                      isLiquidado ? 'Transferido a tu banco' : 'Pendiente de liquidación (Viernes)',
+                      isLiquidado
+                          ? 'Transferido a tu banco'
+                          : 'Pendiente de liquidación (Viernes)',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
-                        color: isLiquidado ? const Color(0xFF16A34A) : const Color(0xFFB45309),
+                        color: isLiquidado
+                            ? const Color(0xFF16A34A)
+                            : const Color(0xFFB45309),
                       ),
                     ),
                   ],
@@ -953,19 +1375,24 @@ class _SupplierIncomingOrdersScreenState
               ],
             ),
             if (status.toLowerCase() == 'entregado') ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               SizedBox(
                 width: double.infinity,
-                height: 34,
+                height: 36,
                 child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.amber.shade900,
                     side: BorderSide(color: Colors.amber.shade600),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                     padding: EdgeInsets.zero,
                   ),
-                  icon: const Icon(Icons.star, size: 15),
-                  label: const Text('Calificar Restaurante',
-                      style: TextStyle(fontSize: 12)),
+                  icon: const Icon(Icons.star, size: 16),
+                  label: const Text(
+                    'Calificar Restaurante',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
+                  ),
                   onPressed: () {
                     showDialog(
                       context: context,
@@ -1057,10 +1484,7 @@ class _SupplierIncomingOrdersScreenState
               constraints: const BoxConstraints(maxWidth: 1200),
               child: Column(
                 children: [
-                  // 1. Tarjeta de Cartera: Saldo que realmente falta por liquidar
                   _buildWalletCard(allOrders),
-
-                  // 2. Buscador y Filtros
                   Container(
                     color: Colors.white,
                     margin: const EdgeInsets.only(top: 8),
@@ -1112,8 +1536,6 @@ class _SupplierIncomingOrdersScreenState
                       ],
                     ),
                   ),
-
-                  // 3. Listado o Grid de Pedidos
                   Expanded(
                     child: filteredOrders.isEmpty
                         ? Center(
@@ -1143,7 +1565,7 @@ class _SupplierIncomingOrdersScreenState
                                     crossAxisCount: 2,
                                     crossAxisSpacing: 18,
                                     mainAxisSpacing: 18,
-                                    mainAxisExtent: 380,
+                                    mainAxisExtent: 430,
                                   ),
                                   itemCount: filteredOrders.length,
                                   itemBuilder: (context, index) =>

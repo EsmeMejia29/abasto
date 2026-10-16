@@ -22,6 +22,7 @@ class AppTheme {
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
+      fontFamily: 'Roboto',
       scaffoldBackgroundColor: AppColors.background,
       colorScheme: ColorScheme.light(
         primary: AppColors.primaryBlue,
@@ -74,7 +75,6 @@ class AppTheme {
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         ),
       ),
-      // Reemplaza CardTheme por CardThemeData:
       cardTheme: CardThemeData(
         color: Colors.white,
         elevation: 1.5,
