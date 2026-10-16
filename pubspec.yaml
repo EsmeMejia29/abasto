@@ -15,6 +15,7 @@ dependencies:
   image_picker: ^1.2.4
   http: ^1.2.0
   url_launcher: ^6.3.0
+  google_fonts: ^8.2.1
 
 dev_dependencies:
   flutter_test:
@@ -26,10 +27,3 @@ flutter:
 
   assets:
     - assets/images/
-
-  fonts:
-    - family: Roboto
-      fonts:
-        - asset: assets/fonts/Roboto/static/Roboto-Regular.ttf
-        - asset: assets/fonts/Roboto/static/Roboto-Bold.ttf
-          weight: 700
