@@ -277,25 +277,14 @@ class _AuthScreenState extends State<AuthScreen> {
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  '¡Cuenta registrada con éxito!',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Hemos enviado un enlace a $email. Revisa tu bandeja de entrada o spam para confirmar tu correo antes de ingresar.',
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ],
+          const SnackBar(
+            content: Text(
+              '¡Cuenta registrada con éxito!',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
             ),
             backgroundColor: AppColors.tealMint,
             behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 6),
+            duration: Duration(seconds: 3),
           ),
         );
       }

@@ -1,5 +1,7 @@
+import 'dart:html' as html;
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../config/session_manager.dart';
 import '../../main.dart';
 import '../../theme/app_theme.dart';
@@ -19,8 +21,6 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
   int _currentStep = 0;
   bool _isSaving = false;
   bool _isLoadingInitialData = true;
-
-  final ImagePicker _imagePicker = ImagePicker();
 
   // Paso 1: Perfil y Datos Comerciales (Tabla 'profiles')
   final _businessNameCtrl = TextEditingController(text: 'Mi Distribuidora');
@@ -169,20 +169,32 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
     }
   }
 
+  // Carga directa nativa para Web al Bucket 'product-images' con FileOptions explícito
   Future<void> _pickAndUploadImage(Map<String, dynamic> row) async {
     try {
-      final XFile? file = await _imagePicker.pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 85,
-        maxWidth: 1024,
-      );
+      final uploadInput = html.FileUploadInputElement()..accept = 'image/*';
+      uploadInput.click();
 
-      if (file == null) return;
+      await uploadInput.onChange.first;
+      if (uploadInput.files == null || uploadInput.files!.isEmpty) return;
 
+      final file = uploadInput.files!.first;
       setState(() => row['isUploading'] = true);
 
-      final bytes = await file.readAsBytes();
+      final reader = html.FileReader();
+      reader.readAsArrayBuffer(file);
+      await reader.onLoadEnd.first;
+
+      final Uint8List bytes = reader.result as Uint8List;
       final fileExt = file.name.split('.').last.toLowerCase();
+
+      String mimeType = 'image/jpeg';
+      if (fileExt == 'png') {
+        mimeType = 'image/png';
+      } else if (fileExt == 'webp') {
+        mimeType = 'image/webp';
+      }
+
       final currentAuthId = supabase.auth.currentUser?.id ?? widget.supplierId;
       final fileName =
           '$currentAuthId/${DateTime.now().millisecondsSinceEpoch}.$fileExt';
@@ -190,6 +202,10 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
       await supabase.storage.from('product-images').uploadBinary(
             fileName,
             bytes,
+            fileOptions: FileOptions(
+              contentType: mimeType,
+              upsert: true,
+            ),
           );
 
       final publicUrl =
@@ -202,7 +218,7 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Foto del insumo subida con éxito.'),
+            content: Text('Foto del insumo subida al bucket con éxito.'),
             backgroundColor: AppColors.tealMint,
             duration: Duration(seconds: 2),
           ),
@@ -234,7 +250,9 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
         setState(() => _isSaving = false);
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => const MainNavigationHolder()),
+          MaterialPageRoute(
+            builder: (context) => const SupplierNavigationHolder(),
+          ),
           (route) => false,
         );
       }
@@ -246,7 +264,7 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
           ? _categoryDetailsCtrl.text.trim()
           : _selectedCategories.join(', ');
 
-      // 1. Guardar y actualizar ficha en 'profiles' asegurando rol supplier
+      // 1. Guardar datos en profiles asegurando rol supplier
       await supabase.from('profiles').upsert({
         'id': userId,
         'business_name': _businessNameCtrl.text.trim().isNotEmpty
@@ -264,7 +282,7 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
         'role': 'supplier',
       });
 
-      // 2. Guardar la configuración en 'supplier_details'
+      // 2. Guardar datos logísticos en supplier_details
       await supabase.from('supplier_details').upsert({
         'profile_id': userId,
         'category': consolidatedCategory,
@@ -277,7 +295,7 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
         'onboarding_completed': true,
       });
 
-      // 3. Si eligió registrar productos iniciales, insertarlos
+      // 3. Insertar productos con sus imágenes en 'products'
       if (!_startCatalogFromZero) {
         final productsToInsert = <Map<String, dynamic>>[];
         for (var row in _initialProducts) {
@@ -312,6 +330,8 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
       }
 
       if (mounted) {
+        SessionManager.switchRole(UserRole.supplier);
+
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('¡Distribuidora y catálogo guardados con éxito!'),
@@ -322,7 +342,9 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
 
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => const MainNavigationHolder()),
+          MaterialPageRoute(
+            builder: (context) => const SupplierNavigationHolder(),
+          ),
           (route) => false,
         );
       }
@@ -787,7 +809,7 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
                             controller: row['name'] as TextEditingController,
                             decoration: const InputDecoration(
                               labelText: 'Nombre del Insumo',
-                              hintText: 'Ej. Queso Morolique',
+                              hintText: 'Ej. Harina de trigo',
                               isDense: true,
                               border: OutlineInputBorder(),
                             ),
@@ -800,7 +822,7 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
                             controller: row['unit'] as TextEditingController,
                             decoration: const InputDecoration(
                               labelText: 'Presentación',
-                              hintText: 'Caja 50 lb',
+                              hintText: '10 Libras',
                               isDense: true,
                               border: OutlineInputBorder(),
                             ),
