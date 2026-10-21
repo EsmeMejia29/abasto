@@ -11,6 +11,8 @@ import '../order_chat_screen.dart';
 import '../../widgets/review_dialog.dart';
 import 'supplier_bank_settings_screen.dart';
 
+import '../../services/notification_service.dart';
+
 class SupplierIncomingOrdersScreen extends StatefulWidget {
   const SupplierIncomingOrdersScreen({super.key});
 
@@ -45,6 +47,7 @@ class _SupplierIncomingOrdersScreenState
         _searchQuery = _searchCtrl.text.trim().toLowerCase();
       });
     });
+    NotificationService.initializeAndRegisterToken();
   }
 
   void _setupRealtime() {
@@ -262,8 +265,6 @@ class _SupplierIncomingOrdersScreenState
         return 'En Ruta';
       case 'entregado':
         return 'Entregado';
-      case 'confirmado':
-        return 'Confirmado';
       case 'pendiente':
         return 'Pendiente';
       case 'cancelado':
@@ -1331,10 +1332,7 @@ class _SupplierIncomingOrdersScreenState
                     const PopupMenuItem(
                       value: 'pendiente',
                       child: Text('Marcar Pendiente'),
-                    ),
-                    const PopupMenuItem(
-                      value: 'confirmado',
-                      child: Text('Confirmar Pedido'),
+                      
                     ),
                     const PopupMenuItem(
                       value: 'enRuta',
@@ -1445,10 +1443,7 @@ class _SupplierIncomingOrdersScreenState
               .where((o) =>
                   (o['status'] ?? '').toString().toLowerCase() == 'pendiente')
               .length;
-          final countConfirmados = allOrders
-              .where((o) =>
-                  (o['status'] ?? '').toString().toLowerCase() == 'confirmado')
-              .length;
+          
           final countEnRuta = allOrders
               .where((o) => ['enruta', 'en ruta']
                   .contains((o['status'] ?? '').toString().toLowerCase()))
@@ -1522,8 +1517,6 @@ class _SupplierIncomingOrdersScreenState
                               _buildFilterChip('Todos', 'todos', countTodos),
                               _buildFilterChip(
                                   'Pendientes', 'pendiente', countPendientes),
-                              _buildFilterChip(
-                                  'Confirmados', 'confirmado', countConfirmados),
                               _buildFilterChip(
                                   'En Ruta', 'enruta', countEnRuta),
                               _buildFilterChip(

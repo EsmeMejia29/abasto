@@ -3,6 +3,7 @@ import '../main.dart';
 import '../models/supplier.dart';
 import '../theme/app_theme.dart';
 import '../config/session_manager.dart';
+import '../services/notification_service.dart';
 import 'supplier_detail_screen.dart';
 import '../widgets/business_info_sheet.dart';
 
@@ -38,6 +39,9 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _loadRestaurantProfile();
     _suppliersFuture = _fetchSuppliers();
+
+    // Solicitar permiso al dispositivo y guardar el token FCM en Supabase
+    NotificationService.initializeAndRegisterToken();
   }
 
   @override

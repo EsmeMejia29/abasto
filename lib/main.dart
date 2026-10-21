@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_core/firebase_core.dart';
 
 import 'config/supabase_config.dart';
+import 'services/notification_service.dart';
 import 'screens/crm_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/orders_screen.dart';
@@ -17,10 +19,29 @@ final supabase = Supabase.instance.client;
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // 1. Inicialización de Supabase
   await Supabase.initialize(
     url: SupabaseConfig.url,
     anonKey: SupabaseConfig.anonKey,
   );
+
+  // 2. Inicialización de Firebase Web
+  await Firebase.initializeApp(
+    options: const FirebaseOptions(
+      apiKey: "AIzaSyBtMzLjo_jFiLmPUytCC2J0bxhCZgUiJp0",
+      appId: "1:467568058533:web:a36598ccf13196df232d4c",
+      messagingSenderId: "467568058533",
+      projectId: "abasto-sv",
+      authDomain: "abasto-sv.firebaseapp.com",
+      storageBucket: "abasto-sv.firebasestorage.app",
+      measurementId: "G-NW0GVX6129",
+    ),
+  );
+
+  // 3. Si ya hay una sesión guardada activa, inicializar notificaciones de inmediato
+  if (supabase.auth.currentUser != null) {
+    NotificationService.initializeAndRegisterToken();
+  }
 
   runApp(const AbastoApp());
 }
