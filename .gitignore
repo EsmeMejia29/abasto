@@ -51,3 +51,10 @@ lib/config/supabase_config.dart
 .env
 .vercel
 .env*
+
+# Configuración local de Firebase con llaves
+web/firebase-config.js
+
+# Carpeta de compilación de Flutter Web (evita alertas de build/)
+build/
+.dart_tool/
