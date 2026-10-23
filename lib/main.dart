@@ -26,17 +26,20 @@ Future<void> main() async {
   );
 
   // 2. Inicialización de Firebase Web
-  await Firebase.initializeApp(
-    options: const FirebaseOptions(
-      apiKey: "AIzaSyBtMzLjo_jFiLmPUytCC2J0bxhCZgUiJp0",
-      appId: "1:467568058533:web:a36598ccf13196df232d4c",
-      messagingSenderId: "467568058533",
-      projectId: "abasto-sv",
-      authDomain: "abasto-sv.firebaseapp.com",
-      storageBucket: "abasto-sv.firebasestorage.app",
-      measurementId: "G-NW0GVX6129",
-    ),
-  );
+  try {
+    await Firebase.initializeApp(
+      options: const FirebaseOptions(
+        apiKey: 'AIzaSy' 'BtMzLjo_jFiLmPUytCC2J0bxhCZgUiJp0',
+        authDomain: 'abasto-sv.firebaseapp.com',
+        projectId: 'abasto-sv',
+        storageBucket: 'abasto-sv.firebasestorage.app',
+        messagingSenderId: '467568058533',
+        appId: '1:467568058533:web:a36598ccf13196df232d4c',
+      ),
+    );
+  } catch (e) {
+    debugPrint('Aviso Firebase: $e');
+  }
 
   // 3. Si ya hay una sesión guardada activa, inicializar notificaciones de inmediato
   if (supabase.auth.currentUser != null) {
