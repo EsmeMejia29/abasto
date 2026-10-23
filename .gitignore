@@ -56,5 +56,5 @@ lib/config/supabase_config.dart
 web/firebase-config.js
 
 # Carpeta de compilación de Flutter Web (evita alertas de build/)
-build/
+# build/
 .dart_tool/
