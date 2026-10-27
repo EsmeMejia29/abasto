@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
-import '../theme/app_theme.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/session_manager.dart';
-import 'auth_screen.dart';
+import '../main.dart';
+import '../theme/app_theme.dart';
+import '../utils/error_handler.dart';
 import 'admin/admin_settlements_screen.dart';
+import 'auth_screen.dart';
 
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
@@ -17,9 +20,11 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   void _showAdminAccessDialog() {
     final passwordCtrl = TextEditingController();
     bool obscureText = true;
+    bool isAuthenticating = false;
 
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -46,6 +51,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
               TextField(
                 controller: passwordCtrl,
                 obscureText: obscureText,
+                enabled: !isAuthenticating,
                 decoration: InputDecoration(
                   labelText: 'Contraseña de Administrador',
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -60,31 +66,71 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx),
+              onPressed: isAuthenticating ? null : () => Navigator.pop(ctx),
               child: const Text('Cancelar'),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryBlue),
-              onPressed: () {
-                final pass = passwordCtrl.text.trim();
-                if (pass == 'Abasto2026*' || pass == 'admin123' || pass == '123456') {
-                  Navigator.pop(ctx);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const AdminSettlementsScreen(),
-                    ),
-                  );
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Contraseña de administrador incorrecta'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              },
-              child: const Text('Ingresar', style: TextStyle(color: Colors.white)),
+              onPressed: isAuthenticating
+                  ? null
+                  : () async {
+                      final pass = passwordCtrl.text.trim();
+                      if (pass.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Por favor ingresa la contraseña.'),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                        return;
+                      }
+
+                      setDialogState(() => isAuthenticating = true);
+
+                      try {
+                        // Iniciar sesión real en Supabase Authentication
+                        final res = await supabase.auth.signInWithPassword(
+                          email: 'abasto.developers@gmail.com',
+                          password: pass,
+                        );
+
+                        if (res.user != null && mounted) {
+                          Navigator.pop(ctx); // Cerrar diálogo
+                          Navigator.pushAndRemoveUntil(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const AdminSettlementsScreen(),
+                            ),
+                            (route) => false,
+                          );
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          final friendlyMsg = ErrorHandler.parse(e);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(friendlyMsg),
+                              backgroundColor: Colors.red.shade700,
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                      } finally {
+                        if (mounted) {
+                          setDialogState(() => isAuthenticating = false);
+                        }
+                      }
+                    },
+              child: isAuthenticating
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : const Text('Ingresar', style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
@@ -99,7 +145,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 460), // Ancho máximo ideal para desktop
+            constraints: const BoxConstraints(maxWidth: 460),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 24.0),
               child: Column(

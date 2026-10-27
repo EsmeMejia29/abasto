@@ -65,102 +65,100 @@ class _AuthScreenState extends State<AuthScreen> {
       return;
     }
 
-    // ----------------------------------------------------
-    // ACCESO DIRECTO DE ADMINISTRADOR (abasto.developers@gmail.com)
-    // ----------------------------------------------------
-    if (email.toLowerCase() == 'abasto.developers@gmail.com') {
-      if (password == 'Abasto2026*' || password == 'admin123' || password == '123456') {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (context) => const AdminSettlementsScreen(),
-          ),
-          (route) => false,
-        );
-        return;
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Contraseña de administrador incorrecta.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-    }
-
     setState(() => _isLoading = true);
 
     try {
+      // 1. Autenticar credenciales en Supabase Auth
       final res = await supabase.auth.signInWithPassword(
         email: email,
         password: password,
       );
 
       final currentUserId = res.user?.id;
-      if (currentUserId != null) {
-        final prof = await supabase
-            .from('profiles')
-            .select('role, business_name')
-            .eq('id', currentUserId)
+      if (currentUserId == null) {
+        throw const AuthException('No se pudo validar el usuario.');
+      }
+
+      // ----------------------------------------------------
+      // REDIRECCIÓN ADMINISTRADOR (abasto.developers@gmail.com)
+      // ----------------------------------------------------
+      if (email.toLowerCase() == 'abasto.developers@gmail.com') {
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(
+              builder: (context) => const AdminSettlementsScreen(),
+            ),
+            (route) => false,
+          );
+        }
+        return;
+      }
+
+      // ----------------------------------------------------
+      // FLUJO DE CLIENTES REGULARES (Restaurantes / Distribuidores)
+      // ----------------------------------------------------
+      final prof = await supabase
+          .from('profiles')
+          .select('role, business_name')
+          .eq('id', currentUserId)
+          .maybeSingle();
+
+      if (prof != null) {
+        final roleStr = (prof['role'] ?? '').toString().toLowerCase().trim();
+        final bName = (prof['business_name'] ?? '').toString().toLowerCase().trim();
+
+        final bool isSupplier = roleStr == 'supplier' ||
+            roleStr == 'distribuidor' ||
+            roleStr == 'proveedor' ||
+            bName.contains('distribuidor');
+
+        final userRole = isSupplier ? UserRole.supplier : UserRole.restaurant;
+        SessionManager.switchRole(userRole);
+        _role = userRole;
+      }
+
+      // Verificación de Onboarding
+      if (_role == UserRole.restaurant) {
+        final restDetails = await supabase
+            .from('restaurant_details')
+            .select('onboarding_completed')
+            .eq('profile_id', currentUserId)
             .maybeSingle();
 
-        if (prof != null) {
-          final roleStr = (prof['role'] ?? '').toString().toLowerCase().trim();
-          final bName = (prof['business_name'] ?? '').toString().toLowerCase().trim();
-
-          final bool isSupplier = roleStr == 'supplier' ||
-              roleStr == 'distribuidor' ||
-              roleStr == 'proveedor' ||
-              bName.contains('distribuidor');
-
-          final userRole = isSupplier ? UserRole.supplier : UserRole.restaurant;
-          SessionManager.switchRole(userRole);
-          _role = userRole;
+        final bool completed = restDetails?['onboarding_completed'] ?? false;
+        if (!completed && mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (context) =>
+                  RestaurantOnboardingScreen(restaurantId: currentUserId),
+            ),
+            (route) => false,
+          );
+          return;
         }
+      } else if (_role == UserRole.supplier) {
+        final suppDetails = await supabase
+            .from('supplier_details')
+            .select('onboarding_completed')
+            .eq('profile_id', currentUserId)
+            .maybeSingle();
 
-        // Verificación de Onboarding
-        if (_role == UserRole.restaurant) {
-          final restDetails = await supabase
-              .from('restaurant_details')
-              .select('onboarding_completed')
-              .eq('profile_id', currentUserId)
-              .maybeSingle();
-
-          final bool completed = restDetails?['onboarding_completed'] ?? false;
-          if (!completed && mounted) {
-            Navigator.pushAndRemoveUntil(
-              context,
-              MaterialPageRoute(
-                builder: (context) =>
-                    RestaurantOnboardingScreen(restaurantId: currentUserId),
-              ),
-              (route) => false,
-            );
-            return;
-          }
-        } else if (_role == UserRole.supplier) {
-          final suppDetails = await supabase
-              .from('supplier_details')
-              .select('onboarding_completed')
-              .eq('profile_id', currentUserId)
-              .maybeSingle();
-
-          final bool completed = suppDetails?['onboarding_completed'] ?? false;
-          if (!completed && mounted) {
-            Navigator.pushAndRemoveUntil(
-              context,
-              MaterialPageRoute(
-                builder: (context) =>
-                    SupplierOnboardingScreen(supplierId: currentUserId),
-              ),
-              (route) => false,
-            );
-            return;
-          }
+        final bool completed = suppDetails?['onboarding_completed'] ?? false;
+        if (!completed && mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (context) =>
+                  SupplierOnboardingScreen(supplierId: currentUserId),
+            ),
+            (route) => false,
+          );
+          return;
         }
       }
 
-      // Redirección condicionada según el rol real del usuario
+      // Redirección condicionada según el rol
       if (mounted) {
         if (_role == UserRole.supplier) {
           Navigator.pushAndRemoveUntil(
@@ -196,7 +194,6 @@ class _AuthScreenState extends State<AuthScreen> {
   // 2. FLUJO EXCLUSIVO DE REGISTRO
   // ========================================================
   Future<void> _submitRegister() async {
-    // Si _regEmailCtrl tiene texto (escritorio), úsalo; si está vacío, toma _emailCtrl (móvil)
     final email = (_regEmailCtrl.text.isNotEmpty ? _regEmailCtrl.text : _emailCtrl.text).trim();
     final password = (_regPasswordCtrl.text.isNotEmpty ? _regPasswordCtrl.text : _passwordCtrl.text).trim();
     final businessName = _regBusinessNameCtrl.text.trim();
@@ -303,7 +300,6 @@ class _AuthScreenState extends State<AuthScreen> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-  
 
   // --- Formulario de Iniciar Sesión ---
   Widget _buildLoginForm({bool isDesktop = false}) {
@@ -462,9 +458,6 @@ class _AuthScreenState extends State<AuthScreen> {
           builder: (context, constraints) {
             final isDesktop = constraints.maxWidth >= 850;
 
-            // ==========================================
-            // VISTA ESCRITORIO (Dos columnas lado a lado)
-            // ==========================================
             if (isDesktop) {
               return Center(
                 child: SingleChildScrollView(
@@ -535,9 +528,6 @@ class _AuthScreenState extends State<AuthScreen> {
               );
             }
 
-            // ==========================================
-            // VISTA MÓVIL (Tarjeta compacta tradicional)
-            // ==========================================
             return Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 480),
