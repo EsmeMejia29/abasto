@@ -341,60 +341,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
               const SizedBox(height: 20),
 
-              // ACCESO AL PANEL DE ADMINISTRADOR (Visible para rol admin)
-              if (_isAdmin) ...[
-                Container(
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0F172A),
-                    borderRadius: BorderRadius.circular(14),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.08),
-                        blurRadius: 8,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
-                  ),
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 6),
-                    leading: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(Icons.admin_panel_settings,
-                          color: Colors.white, size: 24),
-                    ),
-                    title: const Text(
-                      'Panel de Liquidaciones (Admin)',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14),
-                    ),
-                    subtitle: const Text(
-                      'Ver saldos y transferir a distribuidores cada viernes',
-                      style: TextStyle(
-                          color: Color(0xFF94A3B8), fontSize: 12),
-                    ),
-                    trailing: const Icon(Icons.arrow_forward_ios,
-                        color: Colors.white70, size: 16),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) =>
-                              const AdminSettlementsScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-
+              
               // ACCESO A CUENTA BANCARIA PARA DISTRIBUIDOR
               if (_role == 'supplier') ...[
                 Container(
