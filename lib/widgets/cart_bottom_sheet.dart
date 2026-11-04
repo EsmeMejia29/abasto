@@ -16,7 +16,7 @@ class CartBottomSheet extends StatelessWidget {
     required this.cartItems,
     required this.onQuantityChanged,
     required this.onConfirmOrder,
-    this.platformFeeRate = 0.02,
+    this.platformFeeRate = 0.03,
   });
 
   @override
@@ -220,7 +220,7 @@ class CartBottomSheet extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Tarifa de Servicio Abasto (2%):',
+                      const Text('Tarifa de Servicio Abasto (3%):',
                           style: TextStyle(
                               fontSize: 13, color: AppColors.subtitleGrey)),
                       Text('\$${fee.toStringAsFixed(2)}',

@@ -1,7 +1,7 @@
 import '../main.dart'; // Para acceder al cliente de Supabase
 
 class PricingService {
-  static const double restaurantServiceFeeRate = 0.02; // 2% al restaurante
+  static const double restaurantServiceFeeRate = 0.03; // 3% al restaurante
   static const double supplierCommissionRate = 0.05;   // 5% retenido al distribuidor
 
   // Cálculo de totales

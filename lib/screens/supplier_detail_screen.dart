@@ -23,8 +23,8 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
   final Map<String, int> _selectedQuantities = {};
   bool _isSubmitting = false;
 
-  // Tarifa del 2% integrada al precio de cara al restaurante
-  static const double _platformFeeRate = 0.02;
+  // Tarifa del 3% integrada al precio de cara al restaurante
+  static const double _platformFeeRate = 0.03;
 
   final TextEditingController _searchCtrl = TextEditingController();
   String _selectedCategory = 'Todos';
@@ -54,7 +54,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
       final baseMap = Map<String, dynamic>.from(p as Map<String, dynamic>);
       final double basePrice = (baseMap['price'] as num?)?.toDouble() ?? 0.0;
 
-      // El precio para el restaurante ya incluye la tarifa del 2%
+      // El precio para el restaurante ya incluye la tarifa del 3%
       final double customerPrice =
           double.parse((basePrice * (1 + _platformFeeRate)).toStringAsFixed(2));
       baseMap['price'] = customerPrice;

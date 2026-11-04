@@ -323,9 +323,12 @@ class _SupplierIncomingOrdersScreenState
       final ordId = ord['id'].toString();
 
       if (st == 'entregado' && !_paidOrderIds.contains(ordId)) {
-        final subtotal = (ord['total_amount'] as num?)?.toDouble() ?? 0.0;
-        final commission = subtotal * _supplierCommissionRate;
-        totalPorLiquidar += (subtotal - commission);
+        final totalAmount = (ord['total_amount'] as num?)?.toDouble() ?? 0.0;
+        // Base de catálogo sin el 3% del restaurante
+        final baseInsumos = (ord['subtotal'] as num?)?.toDouble() ??
+            double.parse((totalAmount / 1.03).toStringAsFixed(2));
+        final commission = double.parse((baseInsumos * _supplierCommissionRate).toStringAsFixed(2));
+        totalPorLiquidar += (baseInsumos - commission);
       }
     }
 
@@ -521,12 +524,12 @@ class _SupplierIncomingOrdersScreenState
                   final name = it['product_name'] ?? 'Producto';
                   final qty = it['quantity'] ?? 1;
 
-                  // Precio unitario registrado en la orden (incluye el 2%)
+                  // Precio unitario registrado en la orden (incluye el 3%)
                   final precioUnitario =
                       (it['unit_price'] as num?)?.toDouble() ?? 0.0;
 
-                  // Precio original sin el 2%
-                  final precioOriginal = (precioUnitario / 1.02);
+                  // Precio original sin el 3%
+                  final precioOriginal = (precioUnitario / 1.03);
                   final totalItem = qty * precioUnitario;
 
                   return Padding(
@@ -585,7 +588,7 @@ class _SupplierIncomingOrdersScreenState
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: const Text(
-                                      '+2% Abasto',
+                                      '+3% Abasto',
                                       style: TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.bold,
@@ -1019,9 +1022,12 @@ class _SupplierIncomingOrdersScreenState
   Widget _buildOrderCard(Map<String, dynamic> order) {
     final code = order['code'] ?? 'ORD-000';
     final restaurantName = order['restaurant_name'] ?? 'Restaurante';
-    final subtotal = (order['total_amount'] as num?)?.toDouble() ?? 0.0;
-    final commission = subtotal * _supplierCommissionRate;
-    final netEarnings = subtotal - commission;
+    final totalAmount = (order['total_amount'] as num?)?.toDouble() ?? 0.0;
+    // Base real del distribuidor sin el 3% de Abasto
+    final baseInsumos = (order['subtotal'] as num?)?.toDouble() ??
+        double.parse((totalAmount / 1.03).toStringAsFixed(2));
+    final commission = double.parse((baseInsumos * _supplierCommissionRate).toStringAsFixed(2));
+    final netEarnings = double.parse((baseInsumos - commission).toStringAsFixed(2));
 
     final status = (order['status'] ?? 'pendiente').toString();
     final items = (order['order_items'] as List<dynamic>?) ?? [];
@@ -1192,14 +1198,14 @@ class _SupplierIncomingOrdersScreenState
             ),
             const Divider(height: 14),
 
-            // Desglose de liquidación por orden
+           // Desglose de liquidación por orden
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Venta bruta:',
+                const Text('Precio catálogo (Insumos):',
                     style: TextStyle(
                         fontSize: 12, color: AppColors.subtitleGrey)),
-                Text('\$${subtotal.toStringAsFixed(2)}',
+                Text('\$${baseInsumos.toStringAsFixed(2)}',
                     style: const TextStyle(
                         fontSize: 12, fontWeight: FontWeight.w500)),
               ],
@@ -1301,7 +1307,7 @@ class _SupplierIncomingOrdersScreenState
                                             0.0,
                                   ))
                               .toList(),
-                          totalAmount: subtotal,
+                          totalAmount: totalAmount,
                           status: status == 'enRuta'
                               ? OrderStatus.enRuta
                               : (status == 'entregado'

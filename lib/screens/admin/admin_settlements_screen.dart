@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../main.dart';
+import '../welcome_screen.dart';
 import '../../theme/app_theme.dart';
 
 class AdminSettlementsScreen extends StatefulWidget {
@@ -28,8 +29,8 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
   DateTime _calendarMonth = DateTime.now();
   String? _selectedDateIso;
 
-  static const double _restaurantFeeRate = 0.02; // 2% al restaurante
-  static const double _supplierFeeRate = 0.05;   // 5% al distribuidor
+  static const double _restaurantFeeRate = 0.03; // 3% al restaurante
+  static const double _supplierFeeRate = 0.05;   // 5% al distribuidor sobre precio base
 
   @override
   void initState() {
@@ -58,7 +59,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
 
   DateTime _getNextPayoutFriday() {
     final now = DateTime.now();
-    int daysUntilFriday = (DateTime.friday - now.weekday) % 7;
+    int daysUntilFriday = (5 - now.weekday) % 7;
     if (daysUntilFriday == 0 && now.hour >= 18) {
       daysUntilFriday = 7;
     }
@@ -77,7 +78,6 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
     final suppliers = allProfiles.where((p) => p['role'] == 'supplier').toList();
     final restaurants = allProfiles.where((p) => p['role'] == 'restaurant').toList();
 
-    final supplierIds = suppliers.map((s) => s['id'].toString()).toList();
     final Map<String, String> supplierNamesMap = {
       for (var s in suppliers) s['id'].toString(): s['business_name']?.toString() ?? 'Distribuidor'
     };
@@ -118,7 +118,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
     // REGLA 1 (Distribuidores): Solo se liquidan órdenes efectivamente 'entregado'
     final deliveredOrders = allRelevantOrders.where((o) => o['status'] == 'entregado').toList();
 
-    // REGLA 2 (Restaurantes): Muestra todas las órdenes pagadas ('confirmado' y las que ya pasaron a 'entregado')
+    // REGLA 2 (Restaurantes): Muestra todas las órdenes pagadas ('confirmado' y 'entregado')
     final restaurantPaidOrders = allRelevantOrders;
 
     // 4. Pagos ya transferidos a distribuidores (liquidado)
@@ -196,21 +196,24 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
       pendingOrdersBySupplier[suppId]!.add(ord);
     }
 
-    // 7. Resumen consolidado por distribuidora (Venta bruta directa de la orden: 18.67 - 0.93 = 17.74)
+    // 7. Resumen consolidado por distribuidora (Base neta de insumos sin el 3% de Abasto)
     final List<Map<String, dynamic>> summaryList = [];
     double totalPendingToPayOut = 0.0;
     double totalHistoricalAlreadyPaid = 0.0;
+    double totalSupplierFeesPending = 0.0;
 
     for (var s in suppliers) {
       final sId = s['id'].toString();
       final suppPendingOrders = pendingOrdersBySupplier[sId] ?? [];
       final suppPaidRecords = paidPayoutsBySupplier[sId] ?? [];
 
-      double pendingGross = 0.0;
+      double pendingBaseInsumos = 0.0;
       final List<DateTime> pendingDates = [];
       for (var ord in suppPendingOrders) {
-        final ordAmount = (ord['total_amount'] as num?)?.toDouble() ?? 0.0;
-        pendingGross += ordAmount;
+        final ordTotal = (ord['total_amount'] as num?)?.toDouble() ?? 0.0;
+        final ordBase = (ord['subtotal'] as num?)?.toDouble() ??
+            double.parse((ordTotal / (1 + _restaurantFeeRate)).toStringAsFixed(2));
+        pendingBaseInsumos += ordBase;
 
         if (ord['created_at'] != null) {
           final d = DateTime.tryParse(ord['created_at'].toString())?.toLocal();
@@ -218,9 +221,10 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
         }
       }
 
-      final double pendingFee = double.parse((pendingGross * _supplierFeeRate).toStringAsFixed(2));
-      final double pendingNet = double.parse((pendingGross - pendingFee).toStringAsFixed(2));
+      final double pendingFee = double.parse((pendingBaseInsumos * _supplierFeeRate).toStringAsFixed(2));
+      final double pendingNet = double.parse((pendingBaseInsumos - pendingFee).toStringAsFixed(2));
       totalPendingToPayOut += pendingNet;
+      totalSupplierFeesPending += pendingFee;
 
       double alreadyPaidNet = 0.0;
       DateTime? lastPaidDate;
@@ -254,7 +258,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
         'holder_name': s['account_holder_name'] ?? s['business_name'] ?? 'N/A',
         'holder_doc': s['account_holder_document'] ?? 'N/A',
         'pending_orders_count': suppPendingOrders.length,
-        'pending_gross': pendingGross,
+        'pending_gross': pendingBaseInsumos,
         'pending_fee': pendingFee,
         'pending_net': pendingNet,
         'already_paid_net': alreadyPaidNet,
@@ -273,7 +277,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
       return (b['pending_net'] as double).compareTo(a['pending_net'] as double);
     });
 
-    // 8. Consolidar Estadísticas por Restaurante (incluyendo pedidos confirmados Y entregados)
+    // 8. Consolidar Estadísticas por Restaurante
     final Map<String, List<Map<String, dynamic>>> ordersByRestaurant = {};
     for (var ord in restaurantPaidOrders) {
       final rId = ord['restaurant_id']?.toString() ?? '';
@@ -334,9 +338,8 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
 
     restaurantSummaryList.sort((a, b) => (b['total_paid'] as double).compareTo(a['total_paid'] as double));
 
-    // Saldo que DEBE haber en cuenta = Total de dinero recaudado por Wompi menos lo transferido
     final double shouldBeInBankNow = totalCollectedFromRestaurants - totalHistoricalAlreadyPaid;
-    final double totalPlatformProfit = totalRestaurantFees + (totalPendingToPayOut * (_supplierFeeRate / (1 - _supplierFeeRate)));
+    final double totalPlatformProfit = totalRestaurantFees + totalSupplierFeesPending;
 
     return {
       'suppliers': summaryList,
@@ -410,7 +413,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
     }
   }
 
-  // --- MODAL: PEDIDOS DEL RESTAURANTE (CONFIRMADOS Y ENTREGADOS) ---
+  // --- MODAL: PEDIDOS DEL RESTAURANTE ---
   void _showRestaurantOrdersModal(Map<String, dynamic> rest) {
     final orders = List<Map<String, dynamic>>.from(rest['orders'] ?? []);
     final name = rest['business_name'];
@@ -471,7 +474,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
                       final double totalPagado = (ord['total_amount'] as num?)?.toDouble() ?? 0.0;
                       final double subtotalInsumos = (ord['subtotal'] as num?)?.toDouble() ??
                           double.parse((totalPagado / (1 + _restaurantFeeRate)).toStringAsFixed(2));
-                      final double fee2pct = (ord['platform_fee'] as num?)?.toDouble() ??
+                      final double fee3pct = (ord['platform_fee'] as num?)?.toDouble() ??
                           double.parse((totalPagado - subtotalInsumos).toStringAsFixed(2));
 
                       final items = (ord['order_items'] as List<dynamic>?) ?? [];
@@ -559,7 +562,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text('Insumos base: \$${subtotalInsumos.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, color: AppColors.subtitleGrey)),
-                                Text('Tarifa Abasto (2% incluida): \$${fee2pct.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF16A34A))),
+                                Text('Tarifa Abasto (3% incluida): \$${fee3pct.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF16A34A))),
                               ],
                             ),
                           ],
@@ -622,15 +625,17 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
       try {
         final nowIso = DateTime.now().toUtc().toIso8601String();
         final inserts = pendingOrders.map((ord) {
-          final gross = (ord['total_amount'] as num?)?.toDouble() ?? 0.0;
-          final fee = double.parse((gross * _supplierFeeRate).toStringAsFixed(2));
-          final net = double.parse((gross - fee).toStringAsFixed(2));
+          final totalOrd = (ord['total_amount'] as num?)?.toDouble() ?? 0.0;
+          final baseOrd = (ord['subtotal'] as num?)?.toDouble() ??
+              double.parse((totalOrd / (1 + _restaurantFeeRate)).toStringAsFixed(2));
+          final fee = double.parse((baseOrd * _supplierFeeRate).toStringAsFixed(2));
+          final net = double.parse((baseOrd - fee).toStringAsFixed(2));
 
           return {
             'supplier_id': supplierId,
             'order_id': ord['id'],
             'order_code': ord['code'] ?? 'ORD-000',
-            'gross_amount': gross,
+            'gross_amount': baseOrd,
             'commission_fee': fee,
             'net_payout': net,
             'status': 'liquidado',
@@ -659,7 +664,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
     }
   }
 
-  // --- TARJETA DE CONCILIACIÓN BANCARIA (RESPONSIVA) ---
+  // --- TARJETA DE CONCILIACIÓN BANCARIA ---
   Widget _buildBankReconciliationCard(Map<String, dynamic> data, bool isDesktop) {
     final double shouldBeInBank = data['shouldBeInBankNow'] ?? 0.0;
     final double pendingPayouts = data['totalPendingToPayOut'] ?? 0.0;
@@ -802,7 +807,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
               children: [
                 Expanded(child: _buildBankSubCard('De Distribuidores (Por transferir)', pendingPayouts, 'Corte de viernes (Entregados)', const Color(0xFFFFFBEB), Colors.amber.shade200, Colors.amber.shade900)),
                 const SizedBox(width: 12),
-                Expanded(child: _buildBankSubCard('Ganancia Abasto (2% + 5%)', totalProfit, 'Fondos disponibles', const Color(0xFFECFDF5), const Color(0xFFA7F3D0), const Color(0xFF047857))),
+                Expanded(child: _buildBankSubCard('Ganancia Abasto (3% + 5%)', totalProfit, 'Fondos disponibles', const Color(0xFFECFDF5), const Color(0xFFA7F3D0), const Color(0xFF047857))),
                 const SizedBox(width: 12),
                 Expanded(child: _buildBankSubCard('Ya Transferido a Distribuidores', totalAlreadyPaid, 'Por Transfer365', const Color(0xFFF1F5F9), const Color(0xFFCBD5E1), AppColors.navyDark)),
               ],
@@ -812,7 +817,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
               children: [
                 _buildBankSubCard('De Distribuidores (Por transferir)', pendingPayouts, 'Corte de viernes (Entregados)', const Color(0xFFFFFBEB), Colors.amber.shade200, Colors.amber.shade900),
                 const SizedBox(height: 8),
-                _buildBankSubCard('Ganancia Abasto (2% + 5%)', totalProfit, 'Fondos disponibles', const Color(0xFFECFDF5), const Color(0xFFA7F3D0), const Color(0xFF047857)),
+                _buildBankSubCard('Ganancia Abasto (3% + 5%)', totalProfit, 'Fondos disponibles', const Color(0xFFECFDF5), const Color(0xFFA7F3D0), const Color(0xFF047857)),
                 const SizedBox(height: 8),
                 _buildBankSubCard('Ya Transferido a Distribuidores', totalAlreadyPaid, 'Por Transfer365', const Color(0xFFF1F5F9), const Color(0xFFCBD5E1), AppColors.navyDark),
               ],
@@ -1051,8 +1056,10 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
                     const Text('No hubo pedidos entregados en esta fecha.', style: TextStyle(color: AppColors.subtitleGrey, fontSize: 12))
                   else
                     ...selectedOrders.map((ord) {
-                      final double amount = (ord['total_amount'] as num?)?.toDouble() ?? 0.0;
-                      final double netPayout = double.parse((amount * (1 - _supplierFeeRate)).toStringAsFixed(2));
+                      final double ordTotal = (ord['total_amount'] as num?)?.toDouble() ?? 0.0;
+                      final double ordBase = (ord['subtotal'] as num?)?.toDouble() ??
+                          double.parse((ordTotal / (1 + _restaurantFeeRate)).toStringAsFixed(2));
+                      final double netPayout = double.parse((ordBase * (1 - _supplierFeeRate)).toStringAsFixed(2));
                       return Padding(
                         padding: const EdgeInsets.symmetric(vertical: 4),
                         child: Row(
@@ -1282,7 +1289,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Ventas Entregadas:', style: TextStyle(fontSize: 10, color: AppColors.subtitleGrey)),
+                          const Text('Ventas Catálogo (Insumos):', style: TextStyle(fontSize: 10, color: AppColors.subtitleGrey)),
                           Text('\$${pendingGross.toStringAsFixed(2)} ($count pedidos)', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
                         ],
                       ),
@@ -1429,7 +1436,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
                   children: [
                     Expanded(child: _buildBankSubCard('Total Compras Pagadas', totalCollected, 'Ingreso real en órdenes', const Color(0xFFF0FDF4), const Color(0xFFBBF7D0), const Color(0xFF15803D))),
                     const SizedBox(width: 12),
-                    Expanded(child: _buildBankSubCard('Tarifa Abasto (2% incluida)', totalFees, 'Comisión recaudada', const Color(0xFFEFF6FF), const Color(0xFFBFDBFE), const Color(0xFF1D4ED8))),
+                    Expanded(child: _buildBankSubCard('Tarifa Abasto (3% incluida)', totalFees, 'Comisión recaudada', const Color(0xFFEFF6FF), const Color(0xFFBFDBFE), const Color(0xFF1D4ED8))),
                     const SizedBox(width: 12),
                     Expanded(child: _buildBankSubCard('Restaurantes Registrados', allRestaurants.length.toDouble(), 'Clientes activos', const Color(0xFFF8FAFC), const Color(0xFFCBD5E1), AppColors.navyDark)),
                   ],
@@ -1439,7 +1446,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
                   children: [
                     _buildBankSubCard('Total Compras Pagadas', totalCollected, 'Ingreso real en órdenes', const Color(0xFFF0FDF4), const Color(0xFFBBF7D0), const Color(0xFF15803D)),
                     const SizedBox(height: 8),
-                    _buildBankSubCard('Tarifa Abasto (2% incluida)', totalFees, 'Comisión recaudada', const Color(0xFFEFF6FF), const Color(0xFFBFDBFE), const Color(0xFF1D4ED8)),
+                    _buildBankSubCard('Tarifa Abasto (3% incluida)', totalFees, 'Comisión recaudada', const Color(0xFFEFF6FF), const Color(0xFFBFDBFE), const Color(0xFF1D4ED8)),
                   ],
                 ),
             ],
@@ -1481,9 +1488,9 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
 
   Widget _buildRestaurantCard(Map<String, dynamic> rest, bool isDesktop) {
     final name = rest['business_name'];
-    final double totalPaid = rest['total_paid']; // Suma directa de las órdenes ($18.67 + $22.35 = $41.02)
+    final double totalPaid = rest['total_paid'];
     final double grossSpent = rest['gross_spent'];
-    final double fee2pct = rest['platform_fee_2pct'];
+    final double fee3pct = rest['platform_fee_2pct'];
     final int ordersCount = rest['orders_count'];
     final int branches = rest['branch_count'];
     final phone = rest['phone'] ?? '';
@@ -1560,8 +1567,8 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Tarifa Abasto (2% incluida):', style: TextStyle(fontSize: 10, color: AppColors.subtitleGrey)),
-                        Text('\$${fee2pct.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF16A34A))),
+                        const Text('Tarifa Abasto (3% incluida):', style: TextStyle(fontSize: 10, color: AppColors.subtitleGrey)),
+                        Text('\$${fee3pct.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF16A34A))),
                       ],
                     ),
                   ),
@@ -1636,6 +1643,14 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
         return Scaffold(
           backgroundColor: const Color(0xFFF8FAFC),
           appBar: AppBar(
+            leading: IconButton(
+              tooltip: 'Volver a la pantalla principal',
+              icon: const Icon(Icons.home_outlined),
+              onPressed: () => Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute<void>(builder: (_) => const WelcomeScreen()),
+                (route) => false,
+              ),
+            ),
             title: Text(_currentNavIndex == 0 ? 'Liquidación a Distribuidores' : 'Cobranza y Restaurantes'),
             centerTitle: !isDesktop,
             actions: [
