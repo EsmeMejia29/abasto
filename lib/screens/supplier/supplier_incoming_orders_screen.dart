@@ -266,7 +266,7 @@ class _SupplierIncomingOrdersScreenState
       case 'entregado':
         return 'Entregado';
       case 'pendiente':
-        return 'Pendiente';
+        return 'Sin Pagar';
       case 'cancelado':
         return 'Cancelado';
       default:
@@ -1335,11 +1335,11 @@ class _SupplierIncomingOrdersScreenState
                 PopupMenuButton<String>(
                   onSelected: (newSt) => _updateOrderStatus(order, newSt),
                   itemBuilder: (context) => [
-                    const PopupMenuItem(
-                      value: 'pendiente',
-                      child: Text('Marcar Pendiente'),
+                    //const PopupMenuItem(
+                      //value: 'pendiente',
+                      //child: Text('Marcar Pendiente'),
                       
-                    ),
+                    //), 
                     const PopupMenuItem(
                       value: 'enRuta',
                       child: Text('Despachar En Ruta'),
@@ -1522,7 +1522,7 @@ class _SupplierIncomingOrdersScreenState
                             children: [
                               _buildFilterChip('Todos', 'todos', countTodos),
                               _buildFilterChip(
-                                  'Pendientes', 'pendiente', countPendientes),
+                                  'Sin Pagar', 'pendiente', countPendientes),
                               _buildFilterChip(
                                   'En Ruta', 'enruta', countEnRuta),
                               _buildFilterChip(

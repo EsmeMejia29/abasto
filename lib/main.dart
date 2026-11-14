@@ -14,6 +14,8 @@ import 'screens/supplier/supplier_incoming_orders_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'theme/app_theme.dart';
 
+import 'dart:html' as html;
+
 final supabase = Supabase.instance.client;
 
 Future<void> main() async {
@@ -44,6 +46,20 @@ Future<void> main() async {
   // 3. Si ya hay una sesión guardada activa, inicializar notificaciones de inmediato
   if (supabase.auth.currentUser != null) {
     NotificationService.initializeAndRegisterToken();
+  }
+
+  final uri = Uri.base;
+  final paidOrderCode = uri.queryParameters['identificadorEnlaceComercio'];
+  final txId = uri.queryParameters['idTransaccion'];
+
+  if (paidOrderCode != null && paidOrderCode.isNotEmpty && txId != null) {
+    // Le avisa al modal padre que Wompi aprobó el pago
+    html.window.parent?.postMessage({
+      'type': 'WOMPI_PAYMENT_APPROVED',
+      'orderCode': paidOrderCode,
+      'transactionId': txId,
+    }, '*');
+    return; // Detiene la carga de la pantalla de inicio dentro del iframe
   }
 
   runApp(const AbastoApp());

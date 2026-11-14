@@ -7,6 +7,9 @@ import '../theme/app_theme.dart';
 import '../config/session_manager.dart';
 import 'order_chat_screen.dart';
 import '../widgets/review_dialog.dart';
+import 'dart:ui_web' as ui_web;
+import 'dart:html' as html;
+import 'dart:async';
 
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
@@ -127,7 +130,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
       case 'confirmado':
         return 'Confirmado';
       case 'pendiente':
-        return 'Pendiente';
+        return 'Sin Pagar';
       case 'cancelado':
         return 'Cancelado';
       default:
@@ -139,16 +142,54 @@ class _OrdersScreenState extends State<OrdersScreen> {
   Future<void> _payOrderWithWompi(Map<String, dynamic> order) async {
     final code = order['code'] ?? 'ORD-000';
     final orderId = order['id'].toString();
-    // El total_amount ya contiene el precio final real del cliente
     final double totalToPay =
         ((order['total_amount'] as num?)?.toDouble() ?? 0.0);
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Generando enlace de pago seguro en Wompi...'),
+        content: Text('Cargando pasarela de pago segura...'),
         duration: Duration(seconds: 2),
       ),
     );
+
+    RealtimeChannel? paymentListener;
+    StreamSubscription<html.MessageEvent>? messageSub;
+    bool isClosing = false;
+
+    Future<void> handlePaymentSuccess(String txRef) async {
+      if (isClosing) return;
+      isClosing = true;
+
+      try {
+        final currentHistory =
+            (order['status_history'] as List<dynamic>?) ?? [];
+        final newHistory = List<dynamic>.from(currentHistory)
+          ..add({
+            'status': 'confirmado',
+            'changed_at': DateTime.now().toUtc().toIso8601String(),
+            'note':
+                'Pago aprobado por Wompi (Ref: $txRef • \$${totalToPay.toStringAsFixed(2)})',
+          });
+
+        await supabase.from('orders').update({
+          'status': 'confirmado',
+          'status_history': newHistory,
+        }).eq('id', orderId);
+      } catch (_) {}
+
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        _refresh();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                '¡Pago verificado por el banco! El pedido $code está Confirmado.'),
+            backgroundColor: AppColors.tealMint,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
 
     try {
       final userEmail =
@@ -172,93 +213,156 @@ class _OrdersScreenState extends State<OrdersScreen> {
       }
 
       final String paymentUrl = data['url'];
-      final uri = Uri.parse(paymentUrl);
+      final String viewId =
+          'wompi-widget-$orderId-${DateTime.now().millisecondsSinceEpoch}';
 
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      ui_web.platformViewRegistry.registerViewFactory(viewId, (int id) {
+        return html.IFrameElement()
+          ..src = paymentUrl
+          ..style.border = 'none'
+          ..style.width = '100%'
+          ..style.height = '100%'
+          ..allow = 'payment *';
+      });
 
-        if (mounted) {
-          final paidSuccess = await showDialog<bool>(
-            context: context,
-            barrierDismissible: false,
-            builder: (ctx) => AlertDialog(
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16)),
-              title: Row(
-                children: const [
-                  Icon(Icons.payment, color: Color(0xFF4F46E5)),
-                  SizedBox(width: 8),
-                  Text('Verificando Pago Wompi'),
-                ],
-              ),
-              content: Text(
-                '¿Completaste el pago de \$${totalToPay.toStringAsFixed(2)} para la orden $code en Wompi?',
-                style: const TextStyle(fontSize: 14),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('Aún no / Cancelar',
-                      style: TextStyle(color: Colors.grey)),
-                ),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF16A34A),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
+      if (!mounted) return;
+
+      // 1. Escucha cuando Wompi redirige el iframe a abasto-flame.vercel.app con la transacción aprobada
+      messageSub = html.window.onMessage.listen((event) {
+        final msg = event.data;
+        if (msg is Map && msg['type'] == 'WOMPI_PAYMENT_APPROVED') {
+          if (msg['orderCode'] == code) {
+            final txId = msg['transactionId']?.toString() ?? 'Wompi';
+            handlePaymentSuccess(txId);
+          }
+        }
+      });
+
+      // 2. Respaldo en tiempo real por si el Webhook actualiza primero la base de datos
+      paymentListener = supabase
+          .channel('payment-watch-$orderId')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.update,
+            schema: 'public',
+            table: 'orders',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'id',
+              value: orderId,
+            ),
+            callback: (payload) {
+              final newStatus =
+                  payload.newRecord['status']?.toString().toLowerCase();
+              if (newStatus == 'confirmado' && mounted && !isClosing) {
+                isClosing = true;
+                Navigator.of(context, rootNavigator: true).pop();
+                _refresh();
+              }
+            },
+          )
+          .subscribe();
+
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => Dialog(
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          clipBehavior: Clip.antiAlias,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 520,
+              maxHeight: MediaQuery.of(ctx).size.height * 0.88,
+            ),
+            child: Column(
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  color: AppColors.navyDark,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.lock_outline,
+                              color: Color(0xFF4ADE80), size: 18),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Pago Seguro • $code (\$${totalToPay.toStringAsFixed(2)})',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
                   ),
-                  icon: const Icon(Icons.check_circle_outline, size: 18),
-                  label: const Text('Sí, Pago Realizado',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  onPressed: () => Navigator.pop(ctx, true),
+                ),
+                Expanded(
+                  child: HtmlElementView(viewType: viewId),
+                ),
+                Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    border:
+                        Border(top: BorderSide(color: Colors.grey.shade200)),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: const [
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.primaryBlue,
+                        ),
+                      ),
+                      SizedBox(width: 10),
+                      Flexible(
+                        child: Text(
+                          'Esperando confirmación automática del banco...',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.subtitleGrey,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
-          );
-
-          if (paidSuccess == true) {
-            final currentHistory =
-                (order['status_history'] as List<dynamic>?) ?? [];
-            final newHistory = List<dynamic>.from(currentHistory)
-              ..add({
-                'status': 'confirmado',
-                'changed_at': DateTime.now().toUtc().toIso8601String(),
-                'note':
-                    'Pago verificado exitosamente con Wompi (\$${totalToPay.toStringAsFixed(2)})',
-              });
-
-            await supabase.from('orders').update({
-              'status': 'confirmado',
-              'status_history': newHistory,
-            }).eq('id', orderId);
-
-            _refresh();
-
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                      '¡Pago verificado! El pedido $code ahora está Confirmado.'),
-                  backgroundColor: AppColors.tealMint,
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            }
-          }
-        }
-      } else {
-        throw Exception('No se pudo abrir el navegador');
-      }
+          ),
+        ),
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error al abrir pago: $e'),
+            content: Text('Error al cargar widget de pago: $e'),
             backgroundColor: Colors.red,
           ),
         );
       }
+    } finally {
+      await messageSub?.cancel();
+      await paymentListener?.unsubscribe();
     }
   }
 
@@ -474,7 +578,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                         }
 
                         final double baseSubtotal = double.parse(
-                            (newTotal / 1.02).toStringAsFixed(2));
+                            (newTotal / 1.03).toStringAsFixed(2));
                         final double fee =
                             double.parse((newTotal - baseSubtotal).toStringAsFixed(2));
 
@@ -523,82 +627,93 @@ class _OrdersScreenState extends State<OrdersScreen> {
     final createdAt = order['created_at'] != null
         ? DateTime.tryParse(order['created_at'].toString())?.toLocal()
         : null;
-
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (ctx) => ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(ctx).size.height * 0.75,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Historial: ${order['code']}',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 18),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Historial: ${order['code']}',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
                 ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(ctx),
+                const Divider(),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (createdAt != null)
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.add_shopping_cart, color: Colors.orange),
+                            title: const Text('Pedido Realizado', style: TextStyle(fontWeight: FontWeight.bold)),
+                            subtitle: Text(
+                              '${createdAt.day}/${createdAt.month}/${createdAt.year} ${createdAt.hour.toString().padLeft(2, '0')}:${createdAt.minute.toString().padLeft(2, '0')}',
+                            ),
+                          ),
+                        if (history.isNotEmpty)
+                          ...history.map((h) {
+                            final st = h['status']?.toString() ?? '';
+                            final dt = h['changed_at'] != null
+                                ? DateTime.tryParse(h['changed_at'].toString())?.toLocal()
+                                : null;
+                            final dtStr = dt != null
+                                ? '${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}'
+                                : '';
+
+                            return ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: Icon(
+                                st == 'entregado'
+                                    ? Icons.check_circle
+                                    : (st == 'enRuta'
+                                        ? Icons.local_shipping
+                                        : (st == 'cancelado'
+                                            ? Icons.cancel
+                                            : Icons.sync)),
+                                color: _getStatusColor(st),
+                              ),
+                              title: Text(
+                                'Cambio a: ${_formatStatus(st)}',
+                                style: const TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              subtitle: Text(
+                                h['note'] != null && h['note'].toString().isNotEmpty
+                                    ? '$dtStr • ${h['note']}'
+                                    : dtStr,
+                              ),
+                            );
+                          }),
+                        const SizedBox(height: 10),
+                      ],
+                    ),
+                  ),
                 ),
               ],
             ),
-            const Divider(),
-            if (createdAt != null)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading:
-                    const Icon(Icons.add_shopping_cart, color: Colors.orange),
-                title: const Text('Pedido Realizado',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text(
-                  '${createdAt.day}/${createdAt.month}/${createdAt.year} ${createdAt.hour.toString().padLeft(2, '0')}:${createdAt.minute.toString().padLeft(2, '0')}',
-                ),
-              ),
-            if (history.isNotEmpty)
-              ...history.map((h) {
-                final st = h['status']?.toString() ?? '';
-                final dt = h['changed_at'] != null
-                    ? DateTime.tryParse(h['changed_at'].toString())?.toLocal()
-                    : null;
-                final dtStr = dt != null
-                    ? '${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}'
-                    : '';
-
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    st == 'entregado'
-                        ? Icons.check_circle
-                        : (st == 'enRuta'
-                            ? Icons.local_shipping
-                            : (st == 'cancelado'
-                                ? Icons.cancel
-                                : Icons.sync)),
-                    color: _getStatusColor(st),
-                  ),
-                  title: Text(
-                    'Cambio a: ${_formatStatus(st)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: Text(
-                    h['note'] != null && h['note'].toString().isNotEmpty
-                        ? '$dtStr • ${h['note']}'
-                        : dtStr,
-                  ),
-                );
-              }),
-            const SizedBox(height: 10),
-          ],
+          ),
         ),
-      ),
-    );
+      );
   }
 
   Widget _buildOrderCard(Map<String, dynamic> order) {
