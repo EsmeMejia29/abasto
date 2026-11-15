@@ -61,6 +61,19 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
   }
 
   Future<List<Product>> _fetchProducts() async {
+    // 1. Verificar primero si el restaurante tiene pedidos sin comisión disponibles
+    try {
+      final uid = supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
+      final prof = await supabase
+          .from('profiles')
+          .select('free_commission_orders')
+          .eq('id', uid)
+          .maybeSingle();
+      _freeCredits = (prof?['free_commission_orders'] as num?)?.toInt() ?? 0;
+    } catch (_) {}
+
+    final bool apply3Pct = _freeCredits <= 0;
+
     final response = await supabase
         .from('products')
         .select('*')
@@ -72,9 +85,10 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
       final baseMap = Map<String, dynamic>.from(p as Map<String, dynamic>);
       final double basePrice = (baseMap['price'] as num?)?.toDouble() ?? 0.0;
 
-      // El precio para el restaurante ya incluye la tarifa del 3%
-      final double customerPrice =
-          double.parse((basePrice * (1 + _platformFeeRate)).toStringAsFixed(2));
+      // Si tiene bono de referido, muestra el precio base sin el 3%
+      final double customerPrice = apply3Pct
+          ? double.parse((basePrice * (1 + _platformFeeRate)).toStringAsFixed(2))
+          : basePrice;
       baseMap['price'] = customerPrice;
 
       return Product.fromMap(baseMap);
