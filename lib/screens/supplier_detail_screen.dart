@@ -158,20 +158,19 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
         }
       ];
 
-      final double subtotalInsumos =
-          double.parse((totalAmount / (1 + _platformFeeRate)).toStringAsFixed(2));
-
       final bool usedFreeOrder = await supabase.rpc(
             'consume_restaurant_free_order',
             params: {'p_restaurant_id': restaurantId},
           ) ==
           true;
 
+      final double subtotalInsumos = usedFreeOrder
+          ? totalAmount
+          : double.parse((totalAmount / (1 + _platformFeeRate)).toStringAsFixed(2));
       final double feeAbasto = usedFreeOrder
           ? 0.0
           : double.parse((totalAmount - subtotalInsumos).toStringAsFixed(2));
-      final double finalTotal =
-          usedFreeOrder ? subtotalInsumos : totalAmount;
+      final double finalTotal = totalAmount;
 
       Map<String, dynamic> orderInsert;
       try {

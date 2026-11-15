@@ -56143,7 +56143,6 @@ a2=Date.now()
 l="ORD-"+A.dl(new A.bR(a2,0,!1))+"-"+(B.mi.zc(900)+100)
 a2=t.N
 k=A.b([A.a0(["status","pendiente","changed_at",new A.bR(Date.now(),0,!1).vl().lh(),"note","Pedido emitido por el restaurante"],a2,a2)],t.m0)
-j=A.ey(B.d.P(b6/1.03,2))
 a4=t.z
 a5=A.a0(["p_restaurant_id",m],a2,a4)
 a6=a1.CW
@@ -56155,13 +56154,14 @@ A.dc("supabase.postgrest")
 b5=J
 s=6
 return A.l(new A.UH(new A.Me(a8,a7,a6.c,null,null,a6.d,a6.e,null,!1,A.b2s(a6.w,null,!0,a6.x),a6.y,null),null,A.dc("supabase.postgrest")).aG3(a5,!1,a4),$async$qm)
-case 6:i=b5.c(b8,!0)
-h=i?0:A.ey(B.d.P(b6-j,2))
-g=i?j:b6
+case 6:j=b5.c(b8,!0)
+i=j?b6:A.ey(B.d.P(b6/1.03,2))
+h=j?0:A.ey(B.d.P(b6-i,2))
+g=b6
 f=null
 q=8
 s=11
-return A.l(a1.aW("orders").h3(0,A.a0(["code",l,"restaurant_id",m,"supplier_id",n.a.c.a,"total_amount",g,"subtotal",j,"platform_fee",h,"is_commission_free",i,"status","pendiente","status_history",k,"is_financed",!1,"installments_count",1],a2,t.K)).cu(0,"id").Rm(0),$async$qm)
+return A.l(a1.aW("orders").h3(0,A.a0(["code",l,"restaurant_id",m,"supplier_id",n.a.c.a,"total_amount",g,"subtotal",i,"platform_fee",h,"is_commission_free",j,"status","pendiente","status_history",k,"is_financed",!1,"installments_count",1],a2,t.K)).cu(0,"id").Rm(0),$async$qm)
 case 11:f=b8
 q=3
 s=10
