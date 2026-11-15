@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../config/session_manager.dart';
+import '../main.dart';
 import '../theme/app_theme.dart';
 
-class CartBottomSheet extends StatelessWidget {
+class CartBottomSheet extends StatefulWidget {
   final String supplierName;
   final Map<String, dynamic> supplierData;
-  final List<Map<String, dynamic>> cartItems;
+  final List> cartItems;
   final Function(Map<String, dynamic> item, int newQty) onQuantityChanged;
   final VoidCallback onConfirmOrder;
   final double platformFeeRate;
@@ -20,15 +23,45 @@ class CartBottomSheet extends StatelessWidget {
   });
 
   @override
+  State<CartBottomSheet> createState() => _CartBottomSheetState();
+}
+
+class _CartBottomSheetState extends State<CartBottomSheet> {
+  int _freeCredits = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkFreeCommissionCredits();
+  }
+
+  Future<void> _checkFreeCommissionCredits() async {
+    try {
+      final uid = supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
+      final res = await supabase
+          .from('profiles')
+          .select('free_commission_orders')
+          .eq('id', uid)
+          .maybeSingle();
+      if (mounted && res != null) {
+        setState(() {
+          _freeCredits = (res['free_commission_orders'] as num?)?.toInt() ?? 0;
+        });
+      }
+    } catch (_) {}
+  }
+
+  @override
   Widget build(BuildContext context) {
     double subtotal = 0.0;
-    for (var item in cartItems) {
+    for (var item in widget.cartItems) {
       final qty = (item['quantity'] as num?)?.toInt() ?? 1;
       final price = (item['price'] as num?)?.toDouble() ?? 0.0;
       subtotal += qty * price;
     }
 
-    final double fee = subtotal * platformFeeRate;
+    final bool hasFreeOrder = _freeCredits > 0;
+    final double fee = hasFreeOrder ? 0.0 : (subtotal * widget.platformFeeRate);
     final double total = subtotal + fee;
 
     return DraggableScrollableSheet(
@@ -45,7 +78,6 @@ class CartBottomSheet extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Encabezado
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -66,7 +98,7 @@ class CartBottomSheet extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          'Proveedor: $supplierName',
+                          'Proveedor: ${widget.supplierName}',
                           style: const TextStyle(
                               fontSize: 12, color: AppColors.subtitleGrey),
                         ),
@@ -81,10 +113,8 @@ class CartBottomSheet extends StatelessWidget {
               ],
             ),
             const Divider(height: 24),
-
-            // Lista de productos en el carrito
             Expanded(
-              child: cartItems.isEmpty
+              child: widget.cartItems.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -101,10 +131,10 @@ class CartBottomSheet extends StatelessWidget {
                     )
                   : ListView.separated(
                       controller: scrollController,
-                      itemCount: cartItems.length,
+                      itemCount: widget.cartItems.length,
                       separatorBuilder: (_, __) => const Divider(height: 1),
                       itemBuilder: (context, index) {
-                        final item = cartItems[index];
+                        final item = widget.cartItems[index];
                         final name = item['name'] ?? item['product_name'] ?? 'Insumo';
                         final unit = item['unit'] ?? item['presentation'] ?? '';
                         final price = (item['price'] as num?)?.toDouble() ?? 0.0;
@@ -115,7 +145,6 @@ class CartBottomSheet extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(vertical: 10),
                           child: Row(
                             children: [
-                              // Miniatura o icono
                               Container(
                                 width: 44,
                                 height: 44,
@@ -127,7 +156,6 @@ class CartBottomSheet extends StatelessWidget {
                                     color: AppColors.primaryBlue, size: 22),
                               ),
                               const SizedBox(width: 12),
-                              // Detalle
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -149,14 +177,13 @@ class CartBottomSheet extends StatelessWidget {
                                   ],
                                 ),
                               ),
-                              // Control de cantidad
                               Row(
                                 children: [
                                   IconButton(
                                     icon: const Icon(Icons.remove_circle_outline,
                                         color: Colors.red, size: 20),
                                     onPressed: () =>
-                                        onQuantityChanged(item, qty - 1),
+                                        widget.onQuantityChanged(item, qty - 1),
                                   ),
                                   Text(
                                     '$qty',
@@ -170,7 +197,7 @@ class CartBottomSheet extends StatelessWidget {
                                     icon: const Icon(Icons.add_circle_outline,
                                         color: AppColors.primaryBlue, size: 20),
                                     onPressed: () =>
-                                        onQuantityChanged(item, qty + 1),
+                                        widget.onQuantityChanged(item, qty + 1),
                                   ),
                                 ],
                               ),
@@ -192,10 +219,35 @@ class CartBottomSheet extends StatelessWidget {
                       },
                     ),
             ),
-
             const Divider(height: 20),
-
-            // Resumen de liquidación
+            if (hasFreeOrder)
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppColors.tealMint.withOpacity(0.14),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.tealMint.withOpacity(0.5)),
+                ),
+                child: Row(
+                  children: const [
+                    Icon(Icons.card_giftcard_rounded,
+                        size: 18, color: Color(0xFF0F766E)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '¡Beneficio aplicado! 0% Tarifa Abasto en este pedido.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF0F766E),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
@@ -220,14 +272,24 @@ class CartBottomSheet extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Tarifa de Servicio Abasto (3%):',
-                          style: TextStyle(
-                              fontSize: 13, color: AppColors.subtitleGrey)),
-                      Text('\$${fee.toStringAsFixed(2)}',
+                      Text(
+                          hasFreeOrder
+                              ? 'Tarifa Abasto (Bono Referido):'
+                              : 'Tarifa de Servicio Abasto (3%):',
                           style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.primaryBlue)),
+                              fontSize: 13, color: AppColors.subtitleGrey)),
+                      Text(
+                        hasFreeOrder
+                            ? '\$0.00'
+                            : '\$${fee.toStringAsFixed(2)}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: hasFreeOrder
+                              ? const Color(0xFF0F766E)
+                              : AppColors.primaryBlue,
+                        ),
+                      ),
                     ],
                   ),
                   const Divider(height: 16),
@@ -254,8 +316,6 @@ class CartBottomSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-
-            // Botón de confirmación
             SizedBox(
               width: double.infinity,
               height: 48,
@@ -266,7 +326,7 @@ class CartBottomSheet extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                onPressed: cartItems.isEmpty ? null : onConfirmOrder,
+                onPressed: widget.cartItems.isEmpty ? null : widget.onConfirmOrder,
                 icon: const Icon(Icons.check_circle_outline, color: Colors.white),
                 label: Text(
                   'Confirmar Pedido (\$${total.toStringAsFixed(2)})',

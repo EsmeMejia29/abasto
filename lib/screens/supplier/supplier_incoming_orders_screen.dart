@@ -324,10 +324,12 @@ class _SupplierIncomingOrdersScreenState
 
       if (st == 'entregado' && !_paidOrderIds.contains(ordId)) {
         final totalAmount = (ord['total_amount'] as num?)?.toDouble() ?? 0.0;
-        // Base de catálogo sin el 3% del restaurante
         final baseInsumos = (ord['subtotal'] as num?)?.toDouble() ??
             double.parse((totalAmount / 1.03).toStringAsFixed(2));
-        final commission = double.parse((baseInsumos * _supplierCommissionRate).toStringAsFixed(2));
+        final bool isFree = ord['supplier_commission_free'] == true;
+        final commission = isFree
+            ? 0.0
+            : double.parse((baseInsumos * _supplierCommissionRate).toStringAsFixed(2));
         totalPorLiquidar += (baseInsumos - commission);
       }
     }
@@ -1026,7 +1028,10 @@ class _SupplierIncomingOrdersScreenState
     // Base real del distribuidor sin el 3% de Abasto
     final baseInsumos = (order['subtotal'] as num?)?.toDouble() ??
         double.parse((totalAmount / 1.03).toStringAsFixed(2));
-    final commission = double.parse((baseInsumos * _supplierCommissionRate).toStringAsFixed(2));
+    final bool isSupplierFree = order['supplier_commission_free'] == true;
+    final commission = isSupplierFree
+        ? 0.0
+        : double.parse((baseInsumos * _supplierCommissionRate).toStringAsFixed(2));
     final netEarnings = double.parse((baseInsumos - commission).toStringAsFixed(2));
 
     final status = (order['status'] ?? 'pendiente').toString();
@@ -1214,14 +1219,22 @@ class _SupplierIncomingOrdersScreenState
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Uso Abasto (5%):',
-                    style: TextStyle(
+                Text(
+                    isSupplierFree
+                        ? 'Uso Abasto (0% Bono Referido):'
+                        : 'Uso Abasto (5%):',
+                    style: const TextStyle(
                         fontSize: 12, color: AppColors.subtitleGrey)),
-                Text('-\$${commission.toStringAsFixed(2)}',
+                Text(
+                    isSupplierFree
+                        ? '\$0.00'
+                        : '-\$${commission.toStringAsFixed(2)}',
                     style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: Colors.red.shade700)),
+                        color: isSupplierFree
+                            ? const Color(0xFF0F766E)
+                            : Colors.red.shade700)),
               ],
             ),
             const SizedBox(height: 2),
@@ -1382,17 +1395,21 @@ class _SupplierIncomingOrdersScreenState
               const SizedBox(height: 10),
               SizedBox(
                 width: double.infinity,
-                height: 36,
-                child: OutlinedButton.icon(
+                height: 36,child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.amber.shade900,
-                    side: BorderSide(color: Colors.amber.shade600),
+                    foregroundColor: AppColors.navyDark,
+                    backgroundColor: AppColors.tealMint.withOpacity(0.10),
+                    side: BorderSide(color: AppColors.tealMint.withOpacity(0.65)),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
                     padding: EdgeInsets.zero,
                   ),
-                  icon: const Icon(Icons.star, size: 16),
+                  icon: const Icon(
+                    Icons.star_rounded,
+                    size: 17,
+                    color: AppColors.tealMint,
+                  ),
                   label: const Text(
                     'Calificar Restaurante',
                     style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),

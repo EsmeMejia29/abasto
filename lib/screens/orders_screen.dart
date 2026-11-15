@@ -995,6 +995,30 @@ class _OrdersScreenState extends State<OrdersScreen> {
       appBar: AppBar(
         title: const Text('Seguimiento de Pedidos'),
         actions: [
+          TextButton.icon(
+            onPressed: () {
+              final message = Uri.encodeComponent(
+                'Hola, equipo de Abasto, necesito ayuda con mis pedidos.',
+              );
+              html.window.open(
+                'https://wa.me/50360376012?text=$message',
+                '_blank',
+              );
+            },
+            icon: const Icon(
+              Icons.support_agent,
+              size: 18,
+              color: Color(0xFF16A34A),
+            ),
+            label: const Text(
+              '¿Necesitas ayuda?',
+              style: TextStyle(
+                color: Color(0xFF16A34A),
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+              ),
+            ),
+          ),
           IconButton(icon: const Icon(Icons.refresh), onPressed: _refresh),
         ],
       ),

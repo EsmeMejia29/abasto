@@ -1,4 +1,6 @@
+import 'dart:html' as html;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../main.dart';
@@ -8,6 +10,8 @@ import '../utils/error_handler.dart';
 import 'admin/admin_settlements_screen.dart';
 import 'supplier/supplier_bank_settings_screen.dart';
 import 'welcome_screen.dart';
+
+
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -30,6 +34,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _userEmail = '';
   double _rating = 5.0;
   int _reviewsCount = 0;
+  String _referralCode = '';
+  int _freeCommissionOrders = 0;
   List<Map<String, dynamic>> _myReviews = [];
   bool _isLoading = true;
   bool _isSaving = false;
@@ -83,6 +89,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _role = res['role'] ?? 'restaurant';
           _rating = (res['rating'] as num?)?.toDouble() ?? 5.0;
           _reviewsCount = (res['reviews_count'] as num?)?.toInt() ?? 0;
+          _referralCode = res['referral_code']?.toString() ?? '';
+          _freeCommissionOrders =
+              (res['free_commission_orders'] as num?)?.toInt() ?? 0;
         });
       }
 
@@ -237,6 +246,175 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Widget _buildReferralCard() {
+    if (_referralCode.isEmpty) return const SizedBox.shrink();
+
+    final targetRoleText = _role == 'supplier'
+        ? 'un Restaurante'
+        : 'un Distribuidor';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 18),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.tealMint.withOpacity(0.55)),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.navyDark.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.tealMint.withOpacity(0.14),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.card_giftcard_rounded,
+                    color: Color(0xFF0F766E), size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Invita y Gana 1 Pedido Sin Comisión',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14.5,
+                        color: AppColors.navyDark,
+                      ),
+                    ),
+                    Text(
+                      'Invita a $targetRoleText y ambos ganan 0% tarifa Abasto en 1 pedido.',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.subtitleGrey,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'TU CÓDIGO DE INVITACIÓN',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.subtitleGrey,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _referralCode,
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.2,
+                        color: AppColors.navyDark,
+                      ),
+                    ),
+                  ],
+                ),
+                Row(
+                  children: [
+                    IconButton(
+                      tooltip: 'Copiar código',
+                      icon: const Icon(Icons.copy_rounded,
+                          size: 19, color: AppColors.navyDark),
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: _referralCode));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Código copiado al portapapeles'),
+                            backgroundColor: AppColors.tealMint,
+                          ),
+                        );
+                      },
+                    ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.navyDark,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      icon: const Icon(Icons.share_outlined, size: 16),
+                      label: const Text('Invitar',
+                          style: TextStyle(
+                              fontSize: 12.5, fontWeight: FontWeight.bold)),
+                      onPressed: () {
+                        final msg = Uri.encodeComponent(
+                          '¡Hola! Te invito a unirte a Abasto B2B usando mi código $_referralCode. Cuando completes tu primer pedido, ¡ambos tendremos 1 pedido sin comisión! Regístrate aquí: https://abasto-flame.vercel.app/',
+                        );
+                        html.window
+                            .open('https://wa.me/?text=$msg', '_blank');
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          if (_freeCommissionOrders > 0) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.tealMint.withOpacity(0.14),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle,
+                      size: 16, color: Color(0xFF0F766E)),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Tienes $_freeCommissionOrders pedido(s) sin comisión disponible(s)',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF0F766E),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -341,7 +519,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
               const SizedBox(height: 20),
 
-              
+              _buildReferralCard(),
+
               // ACCESO A CUENTA BANCARIA PARA DISTRIBUIDOR
               if (_role == 'supplier') ...[
                 Container(

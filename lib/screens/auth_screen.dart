@@ -29,6 +29,7 @@ class _AuthScreenState extends State<AuthScreen> {
   final _regBusinessNameCtrl = TextEditingController();
   final _regEmailCtrl = TextEditingController();
   final _regPasswordCtrl = TextEditingController();
+  final _regReferralCodeCtrl = TextEditingController();
 
   late UserRole _role;
 
@@ -45,6 +46,7 @@ class _AuthScreenState extends State<AuthScreen> {
     _regBusinessNameCtrl.dispose();
     _regEmailCtrl.dispose();
     _regPasswordCtrl.dispose();
+    _regReferralCodeCtrl.dispose();
     super.dispose();
   }
 
@@ -232,12 +234,30 @@ class _AuthScreenState extends State<AuthScreen> {
         final roleString =
             _role == UserRole.restaurant ? 'restaurant' : 'supplier';
 
+        String? referredById;
+        final rawRef = _regReferralCodeCtrl.text.trim().toUpperCase();
+        if (rawRef.isNotEmpty) {
+          final inviter = await supabase
+              .from('profiles')
+              .select('id, role')
+              .eq('referral_code', rawRef)
+              .maybeSingle();
+
+          if (inviter != null) {
+            final inviterRole = (inviter['role'] ?? '').toString().toLowerCase();
+            if (inviterRole != roleString) {
+              referredById = inviter['id'].toString();
+            }
+          }
+        }
+
         // Guardar en la tabla base de profiles
         await supabase.from('profiles').upsert({
           'id': newUserId,
           'email': email,
           'business_name': businessName,
           'role': roleString,
+          if (referredById != null) 'referred_by': referredById,
           'created_at': DateTime.now().toIso8601String(),
         });
 
@@ -271,6 +291,7 @@ class _AuthScreenState extends State<AuthScreen> {
           _regPasswordCtrl.clear();
           _regBusinessNameCtrl.clear();
           _regEmailCtrl.clear();
+          _regReferralCodeCtrl.clear();
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -339,6 +360,19 @@ class _AuthScreenState extends State<AuthScreen> {
             labelText: 'Contraseña (mínimo 6 caracteres)',
             prefixIcon: Icon(Icons.lock_outline),
             border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _regReferralCodeCtrl,
+          textCapitalization: TextCapitalization.characters,
+          decoration: InputDecoration(
+            labelText: 'Código de invitación (Opcional)',
+            hintText: _role == UserRole.restaurant
+                ? 'Ej. ABA-9F2A (de un Distribuidor)'
+                : 'Ej. ABA-4C1B (de un Restaurante)',
+            prefixIcon: const Icon(Icons.card_giftcard_outlined),
+            border: const OutlineInputBorder(),
           ),
         ),
         const SizedBox(height: 24),

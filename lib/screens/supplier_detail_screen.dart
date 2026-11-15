@@ -29,11 +29,29 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
   final TextEditingController _searchCtrl = TextEditingController();
   String _selectedCategory = 'Todos';
   List<String> _supplierCategories = ['Todos'];
+  int _freeCredits = 0;
 
   @override
   void initState() {
     super.initState();
     _productsFuture = _fetchProducts();
+    _loadFreeCredits();
+  }
+
+  Future<void> _loadFreeCredits() async {
+    try {
+      final uid = supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
+      final res = await supabase
+          .from('profiles')
+          .select('free_commission_orders')
+          .eq('id', uid)
+          .maybeSingle();
+      if (mounted && res != null) {
+        setState(() {
+          _freeCredits = (res['free_commission_orders'] as num?)?.toInt() ?? 0;
+        });
+      }
+    } catch (_) {}
   }
 
   @override
@@ -128,8 +146,18 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
 
       final double subtotalInsumos =
           double.parse((totalAmount / (1 + _platformFeeRate)).toStringAsFixed(2));
-      final double feeAbasto =
-          double.parse((totalAmount - subtotalInsumos).toStringAsFixed(2));
+
+      final bool usedFreeOrder = await supabase.rpc(
+            'consume_restaurant_free_order',
+            params: {'p_restaurant_id': restaurantId},
+          ) ==
+          true;
+
+      final double feeAbasto = usedFreeOrder
+          ? 0.0
+          : double.parse((totalAmount - subtotalInsumos).toStringAsFixed(2));
+      final double finalTotal =
+          usedFreeOrder ? subtotalInsumos : totalAmount;
 
       Map<String, dynamic> orderInsert;
       try {
@@ -137,9 +165,10 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
           'code': orderCode,
           'restaurant_id': restaurantId,
           'supplier_id': widget.supplier.id,
-          'total_amount': totalAmount,
+          'total_amount': finalTotal,
           'subtotal': subtotalInsumos,
           'platform_fee': feeAbasto,
+          'is_commission_free': usedFreeOrder,
           'status': 'pendiente',
           'status_history': initialHistory,
           'is_financed': false,
@@ -377,6 +406,36 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
 
                 const Divider(height: 20),
 
+                if (_freeCredits > 0)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.tealMint.withOpacity(0.14),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color: AppColors.tealMint.withOpacity(0.5)),
+                    ),
+                    child: Row(
+                      children: const [
+                        Icon(Icons.card_giftcard_rounded,
+                            size: 18, color: Color(0xFF0F766E)),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '¡Bono Referido activo! Se descontará el 3% de tarifa Abasto.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF0F766E),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
@@ -395,7 +454,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                             color: AppColors.navyDark),
                       ),
                       Text(
-                        '\$${currentTotal.toStringAsFixed(2)}',
+                        '\$${(_freeCredits > 0 ? (currentTotal / (1 + _platformFeeRate)) : currentTotal).toStringAsFixed(2)}',
                         style: const TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
@@ -425,7 +484,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                           },
                     icon: const Icon(Icons.check_circle_outline, size: 20),
                     label: Text(
-                      'Confirmar Pedido (\$${currentTotal.toStringAsFixed(2)})',
+                      'Confirmar Pedido (\$${(_freeCredits > 0 ? (currentTotal / (1 + _platformFeeRate)) : currentTotal).toStringAsFixed(2)})',
                       style: const TextStyle(
                           fontSize: 15, fontWeight: FontWeight.bold),
                     ),
