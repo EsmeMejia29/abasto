@@ -40,6 +40,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isLoading = true;
   bool _isSaving = false;
   bool _isUploadingPhoto = false;
+  int _monthlyReferralsUsed = 0;
 
   String get _currentUserId =>
       supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
@@ -93,6 +94,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _freeCommissionOrders =
               (res['free_commission_orders'] as num?)?.toInt() ?? 0;
         });
+        final now = DateTime.now();
+      final monthStart = DateTime(now.year, now.month, 1).toUtc().toIso8601String();
+      final refsThisMonth = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('referred_by', _currentUserId)
+          .eq('referral_reward_claimed', true)
+          .gte('referral_reward_claimed_at', monthStart);
+
+      if (mounted) {
+        setState(() {
+          _monthlyReferralsUsed = (refsThisMonth as List).length;
+        });
+      }
       }
 
       // Cargar reseñas recibidas
@@ -296,7 +311,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ),
                     Text(
-                      'Invita a $targetRoleText y ambos ganan 0% tarifa Abasto en 1 pedido.',
+                      'Invita a $targetRoleText nuevo (primera vez en Abasto) y ambos ganan 0% tarifa en 1 pedido. Máximo 3 referidos por mes ($_monthlyReferralsUsed/3 usados este mes).',
                       style: const TextStyle(
                         fontSize: 12,
                         color: AppColors.subtitleGrey,

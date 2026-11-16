@@ -456,22 +456,68 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: const Color(0xFFE2E8F0)),
                   ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  child: Column(
                     children: [
-                      const Text(
-                        'Total a Pagar:',
-                        style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.navyDark),
-                      ),
-                      Text(
-                        '\$${(_freeCredits > 0 ? (currentTotal / (1 + _platformFeeRate)) : currentTotal).toStringAsFixed(2)}',
-                        style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.navyDark),
+                      if (_freeCredits > 0) ...[
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Precio regular Abasto (+3%):',
+                              style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: AppColors.subtitleGrey),
+                            ),
+                            Text(
+                              '\$${(currentTotal * (1 + _platformFeeRate)).toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontSize: 12.5,
+                                decoration: TextDecoration.lineThrough,
+                                color: AppColors.subtitleGrey,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Descuento Tarifa Abasto (3%):',
+                              style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF0F766E)),
+                            ),
+                            Text(
+                              '-\$${((currentTotal * (1 + _platformFeeRate)) - currentTotal).toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF0F766E)),
+                            ),
+                          ],
+                        ),
+                        const Divider(height: 14),
+                      ],
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Total a Pagar:',
+                            style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.navyDark),
+                          ),
+                          Text(
+                            '\$${currentTotal.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.navyDark),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -497,7 +543,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                           },
                     icon: const Icon(Icons.check_circle_outline, size: 20),
                     label: Text(
-                      'Confirmar Pedido (\$${(_freeCredits > 0 ? (currentTotal / (1 + _platformFeeRate)) : currentTotal).toStringAsFixed(2)})',
+                      'Confirmar Pedido (\$${currentTotal.toStringAsFixed(2)})',
                       style: const TextStyle(
                           fontSize: 15, fontWeight: FontWeight.bold),
                     ),
@@ -767,13 +813,28 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  '\$${product.price.toStringAsFixed(2)}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
-                    color: AppColors.primaryBlue,
-                  ),
+                Row(
+                  children: [
+                    Text(
+                      '\$${product.price.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                        color: AppColors.primaryBlue,
+                      ),
+                    ),
+                    if (_freeCredits > 0) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        '\$${(product.price * (1 + _platformFeeRate)).toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          decoration: TextDecoration.lineThrough,
+                          color: AppColors.subtitleGrey,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 6),
 

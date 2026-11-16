@@ -237,17 +237,16 @@ class _AuthScreenState extends State<AuthScreen> {
         String? referredById;
         final rawRef = _regReferralCodeCtrl.text.trim().toUpperCase();
         if (rawRef.isNotEmpty) {
-          final inviter = await supabase
-              .from('profiles')
-              .select('id, role')
-              .eq('referral_code', rawRef)
-              .maybeSingle();
-
-          if (inviter != null) {
-            final inviterRole = (inviter['role'] ?? '').toString().toLowerCase();
-            if (inviterRole != roleString) {
-              referredById = inviter['id'].toString();
-            }
+          final validInviterId = await supabase.rpc(
+            'validate_referral_signup',
+            params: {
+              'p_referral_code': rawRef,
+              'p_new_user_role': roleString,
+              'p_new_user_email': email,
+            },
+          );
+          if (validInviterId != null) {
+            referredById = validInviterId.toString();
           }
         }
 
@@ -367,10 +366,11 @@ class _AuthScreenState extends State<AuthScreen> {
           controller: _regReferralCodeCtrl,
           textCapitalization: TextCapitalization.characters,
           decoration: InputDecoration(
-            labelText: 'Código de invitación (Opcional)',
+            labelText: 'Código de invitación (Opcional • Solo cuentas nuevas)',
             hintText: _role == UserRole.restaurant
                 ? 'Ej. ABA-9F2A (de un Distribuidor)'
                 : 'Ej. ABA-4C1B (de un Restaurante)',
+            helperText: 'Válido únicamente la primera vez que te registras en Abasto.',
             prefixIcon: const Icon(Icons.card_giftcard_outlined),
             border: const OutlineInputBorder(),
           ),
