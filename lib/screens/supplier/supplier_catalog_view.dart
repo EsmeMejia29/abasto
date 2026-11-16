@@ -14,7 +14,11 @@ class SupplierCatalogView extends StatefulWidget {
 class _SupplierCatalogViewState extends State<SupplierCatalogView> {
   bool _isLoading = true;
   List<Map<String, dynamic>> _products = [];
-  String _supplierCategory = 'Lácteos y Quesos';
+  final String _supplierCategory = 'Lácteos y Quesos';
+
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _searchQuery = '';
+  String _selectedCategory = 'Todos';
 
   final List<String> _defaultCategories = [
     'Lácteos y Quesos',
@@ -32,6 +36,17 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
   void initState() {
     super.initState();
     _loadSupplierInfoAndProducts();
+    _searchCtrl.addListener(() {
+      setState(() {
+        _searchQuery = _searchCtrl.text.trim().toLowerCase();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _loadSupplierInfoAndProducts() async {
@@ -39,7 +54,6 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
     try {
       final currentUid = supabase.auth.currentUser?.id;
 
-      // 1. Consultar todos los productos en Supabase
       final res = await supabase
           .from('products')
           .select('*')
@@ -47,10 +61,6 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
 
       final allProducts = List<Map<String, dynamic>>.from(res);
 
-      // 2. Filtrar exactamente los insumos del distribuidor:
-      // - Si fueron creados con tu sesión actual (currentUid)
-      // - O si pertenecen a tu distribuidora previa (cc8f061b...)
-      // - O si son tus productos lácteos registrados (Crema, Leche)
       final myProducts = allProducts.where((p) {
         final sId = p['supplier_id']?.toString() ?? '';
         final name = (p['name'] ?? '').toString().toLowerCase().trim();
@@ -74,7 +84,25 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
     }
   }
 
-  /// Sube la imagen seleccionada a Supabase Storage en el bucket 'product-images'
+  Future<void> _toggleAvailability(
+      Map<String, dynamic> product, bool newValue) async {
+    final prev = product['is_available'] ?? true;
+    setState(() => product['is_available'] = newValue);
+
+    try {
+      await supabase
+          .from('products')
+          .update({'is_available': newValue}).eq('id', product['id']);
+    } catch (e) {
+      if (mounted) {
+        setState(() => product['is_available'] = prev);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al actualizar disponibilidad: $e')),
+        );
+      }
+    }
+  }
+
   Future<String?> _uploadImage(Uint8List bytes, String filename) async {
     try {
       final cleanFileName =
@@ -82,10 +110,7 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
       final path =
           '${_currentUserId.isNotEmpty ? _currentUserId : 'catalog'}/${DateTime.now().millisecondsSinceEpoch}_$cleanFileName';
 
-      await supabase.storage.from('product-images').uploadBinary(
-            path,
-            bytes,
-          );
+      await supabase.storage.from('product-images').uploadBinary(path, bytes);
       return supabase.storage.from('product-images').getPublicUrl(path);
     } catch (e) {
       debugPrint('Error subiendo imagen a product-images: $e');
@@ -93,7 +118,6 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
     }
   }
 
-  /// Diálogo unificado para Crear o Editar Insumos
   void _openProductDialog({Map<String, dynamic>? productToEdit}) {
     final bool isEditing = productToEdit != null;
 
@@ -109,14 +133,12 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
       text: productToEdit?['unit']?.toString() ?? '1 unidad',
     );
 
-    // Preparar lista de categorías disponibles
     final Set<String> categoriesSet = {_supplierCategory, ..._defaultCategories};
     final List<String> availableCategories = categoriesSet.toList();
 
     String selectedCategory =
         productToEdit?['category']?.toString().trim() ?? _supplierCategory;
 
-    // Buscar coincidencia parcial si el texto en BD venía recortado
     final match = availableCategories.firstWhere(
       (c) => c.toLowerCase() == selectedCategory.toLowerCase(),
       orElse: () {
@@ -143,19 +165,19 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
             ),
             title: Text(
               isEditing ? 'Editar Insumo' : 'Nuevo Insumo / Producto',
-              style: const TextStyle(fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold, color: AppColors.navyDark),
             ),
             content: SizedBox(
-              width: 420,
+              width: 440,
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Área interactiva para seleccionar foto
                     Center(
                       child: InkWell(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(14),
                         onTap: () async {
                           final picker = ImagePicker();
                           final XFile? file = await picker.pickImage(
@@ -171,13 +193,13 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
                           }
                         },
                         child: Container(
-                          width: 120,
-                          height: 120,
+                          width: 150,
+                          height: 150,
                           decoration: BoxDecoration(
-                            color: Colors.grey.shade100,
-                            borderRadius: BorderRadius.circular(12),
+                            color: const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(14),
                             border: Border.all(
-                              color: AppColors.primaryBlue.withOpacity(0.4),
+                              color: AppColors.primaryBlue.withOpacity(0.35),
                               width: 1.5,
                             ),
                           ),
@@ -198,13 +220,13 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
                                           MainAxisAlignment.center,
                                       children: const [
                                         Icon(Icons.add_a_photo_outlined,
-                                            size: 36,
+                                            size: 38,
                                             color: AppColors.primaryBlue),
-                                        SizedBox(height: 6),
+                                        SizedBox(height: 8),
                                         Text(
                                           'Subir Foto',
                                           style: TextStyle(
-                                            fontSize: 12,
+                                            fontSize: 13,
                                             fontWeight: FontWeight.w600,
                                             color: AppColors.primaryBlue,
                                           ),
@@ -217,14 +239,12 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
                     const SizedBox(height: 6),
                     const Center(
                       child: Text(
-                        'Toca para seleccionar foto de tu galería o archivos',
+                        'Toca para seleccionar foto desde tu computadora o galería',
                         style: TextStyle(
-                            fontSize: 11, color: AppColors.subtitleGrey),
+                            fontSize: 11.5, color: AppColors.subtitleGrey),
                       ),
                     ),
-                    const SizedBox(height: 16),
-
-                    // Nombre del insumo
+                    const SizedBox(height: 18),
                     TextField(
                       controller: nameCtrl,
                       decoration: const InputDecoration(
@@ -234,8 +254,6 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
                       ),
                     ),
                     const SizedBox(height: 12),
-
-                    // Precio y Presentación
                     Row(
                       children: [
                         Expanded(
@@ -256,7 +274,7 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
                             controller: unitCtrl,
                             decoration: const InputDecoration(
                               labelText: 'Presentación',
-                              hintText: 'ej: 1 Lb, 1 litro',
+                              hintText: 'ej: Caja 50 lb, 1 litro',
                               border: OutlineInputBorder(),
                             ),
                           ),
@@ -264,8 +282,6 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
                       ],
                     ),
                     const SizedBox(height: 12),
-
-                    // Menú desplegable de categorías
                     DropdownButtonFormField<String>(
                       value: selectedCategory,
                       decoration: const InputDecoration(
@@ -379,7 +395,6 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
                             }
                           }
 
-                          // Mapeo ajustado exactamente a la tabla 'products' de Supabase
                           final Map<String, dynamic> payload = {
                             'name': name,
                             'price': price,
@@ -414,7 +429,7 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
                                 content: Text(isEditing
                                     ? 'Insumo actualizado con éxito'
                                     : 'Insumo agregado con éxito'),
-                                backgroundColor: Colors.green.shade700,
+                                backgroundColor: AppColors.tealMint,
                               ),
                             );
                           }
@@ -450,130 +465,488 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
     );
   }
 
+  Widget _buildProductCard(Map<String, dynamic> item) {
+    final String? imgUrl = item['image_url'] ?? item['image'];
+    final String name = item['name']?.toString() ?? 'Insumo';
+    final String unit = item['unit']?.toString() ?? '';
+    final String category = item['category']?.toString() ?? _supplierCategory;
+    final double price = (item['price'] as num?)?.toDouble() ?? 0.0;
+    final bool isAvailable = item['is_available'] ?? true;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isAvailable ? const Color(0xFFE2E8F0) : Colors.grey.shade300,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.navyDark.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Imagen superior + Badge de estado
+          Expanded(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                ClipRRect(
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(15)),
+                  child: (imgUrl != null && imgUrl.isNotEmpty)
+                      ? ColorFiltered(
+                          colorFilter: isAvailable
+                              ? const ColorFilter.mode(
+                                  Colors.transparent, BlendMode.multiply)
+                              : const ColorFilter.mode(
+                                  Colors.grey, BlendMode.saturation),
+                          child: Image.network(
+                            imgUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => _buildEmptyImage(),
+                          ),
+                        )
+                      : _buildEmptyImage(),
+                ),
+                Positioned(
+                  top: 10,
+                  left: 10,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isAvailable
+                          ? AppColors.navyDark.withOpacity(0.85)
+                          : Colors.grey.shade700,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      isAvailable ? 'Activo en tienda' : 'Pausado',
+                      style: TextStyle(
+                        color: isAvailable ? AppColors.tealMint : Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: Material(
+                    color: Colors.white.withOpacity(0.92),
+                    shape: const CircleBorder(),
+                    child: IconButton(
+                      tooltip: 'Editar insumo',
+                      icon: const Icon(Icons.edit_outlined,
+                          size: 18, color: AppColors.navyDark),
+                      onPressed: () => _openProductDialog(productToEdit: item),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Detalles inferiores
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  category.toUpperCase(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.6,
+                    color: AppColors.primaryBlue,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: AppColors.navyDark,
+                  ),
+                ),
+                if (unit.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'Presentación: $unit',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      color: AppColors.subtitleGrey,
+                    ),
+                  ),
+                ],
+                const Divider(height: 18),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Precio catálogo',
+                          style: TextStyle(
+                              fontSize: 10.5, color: AppColors.subtitleGrey),
+                        ),
+                        Text(
+                          '\$${price.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                            color: AppColors.navyDark,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        Switch(
+                          value: isAvailable,
+                          activeColor: AppColors.tealMint,
+                          onChanged: (val) => _toggleAvailability(item, val),
+                        ),
+                        OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.navyDark,
+                            side: const BorderSide(color: Color(0xFFCBD5E1)),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          onPressed: () =>
+                              _openProductDialog(productToEdit: item),
+                          child: const Text(
+                            'Editar',
+                            style: TextStyle(
+                                fontSize: 12.5, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyImage() {
+    return Container(
+      color: const Color(0xFFF1F5F9),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.inventory_2_outlined,
+              size: 44, color: AppColors.primaryBlue.withOpacity(0.55)),
+          const SizedBox(height: 6),
+          const Text(
+            'Sin fotografía',
+            style: TextStyle(fontSize: 11.5, color: AppColors.subtitleGrey),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final categories = {
+      'Todos',
+      ..._products
+          .map((p) => (p['category'] ?? '').toString().trim())
+          .where((c) => c.isNotEmpty)
+    }.toList();
+
+    final filteredProducts = _products.where((p) {
+      final name = (p['name'] ?? '').toString().toLowerCase();
+      final cat = (p['category'] ?? '').toString();
+      final matchesSearch =
+          _searchQuery.isEmpty || name.contains(_searchQuery);
+      final matchesCat =
+          _selectedCategory == 'Todos' || cat == _selectedCategory;
+      return matchesSearch && matchesCat;
+    }).toList();
+
+    final activeCount =
+        _products.where((p) => (p['is_available'] ?? true) == true).length;
+
     return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: const Text('Mi Catálogo de Insumos',
             style: TextStyle(fontWeight: FontWeight.bold)),
         actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.navyDark,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              onPressed: () => _openProductDialog(),
+              icon: const Icon(Icons.add, size: 18, color: AppColors.tealMint),
+              label: const Text(
+                'Nuevo Insumo',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+            ),
+          ),
           IconButton(
+            tooltip: 'Actualizar catálogo',
             icon: const Icon(Icons.refresh),
             onPressed: _loadSupplierInfoAndProducts,
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: AppColors.primaryBlue,
-        icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text('Agregar Insumo',
-            style: TextStyle(color: Colors.white)),
-        onPressed: () => _openProductDialog(),
-      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : _products.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.inventory_2_outlined,
-                          size: 64, color: Colors.grey.shade400),
-                      const SizedBox(height: 12),
-                      const Text(
-                        'Aún no tienes productos en tu catálogo',
-                        style: TextStyle(
-                            fontSize: 16, color: AppColors.subtitleGrey),
+          : Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1200),
+                child: Column(
+                  children: [
+                    // Barra superior de resumen, búsqueda y filtros
+                    Container(
+                      margin: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
                       ),
-                      const SizedBox(height: 12),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.primaryBlue),
-                        onPressed: () => _openProductDialog(),
-                        icon: const Icon(Icons.add, color: Colors.white),
-                        label: const Text('Publicar primer producto',
-                            style: TextStyle(color: Colors.white)),
-                      ),
-                    ],
-                  ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _products.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
-                  itemBuilder: (ctx, i) {
-                    final item = _products[i];
-                    final String? imgUrl =
-                        item['image_url'] ?? item['image'];
-                    final String unit = item['unit'] != null
-                        ? ' (${item['unit']})'
-                        : '';
+                      child: Column(
+                        children: [
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              final isWide = constraints.maxWidth >= 700;
+                              final statsRow = Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _buildStatBadge(
+                                    'Total Insumos',
+                                    '${_products.length}',
+                                    AppColors.navyDark,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  _buildStatBadge(
+                                    'Activos',
+                                    '$activeCount',
+                                    const Color(0xFF0F766E),
+                                  ),
+                                ],
+                              );
 
-                    return Card(
-                      elevation: 1,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 8),
-                        onTap: () => _openProductDialog(productToEdit: item),
-                        leading: Container(
-                          width: 52,
-                          height: 52,
-                          decoration: BoxDecoration(
-                            color: AppColors.primaryBlue.withOpacity(0.08),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.grey.shade200),
+                              final searchField = TextField(
+                                controller: _searchCtrl,
+                                decoration: InputDecoration(
+                                  hintText:
+                                      'Buscar producto en tu catálogo...',
+                                  prefixIcon:
+                                      const Icon(Icons.search, size: 20),
+                                  suffixIcon: _searchQuery.isNotEmpty
+                                      ? IconButton(
+                                          icon:
+                                              const Icon(Icons.clear, size: 18),
+                                          onPressed: () => _searchCtrl.clear(),
+                                        )
+                                      : null,
+                                  filled: true,
+                                  fillColor: const Color(0xFFF1F5F9),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 10),
+                                ),
+                              );
+
+                              if (isWide) {
+                                return Row(
+                                  children: [
+                                    statsRow,
+                                    const SizedBox(width: 20),
+                                    Expanded(child: searchField),
+                                  ],
+                                );
+                              }
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  statsRow,
+                                  const SizedBox(height: 12),
+                                  searchField,
+                                ],
+                              );
+                            },
                           ),
-                          clipBehavior: Clip.antiAlias,
-                          child: (imgUrl != null && imgUrl.isNotEmpty)
-                              ? Image.network(
-                                  imgUrl,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => const Icon(
-                                      Icons.inventory_2,
-                                      color: AppColors.primaryBlue),
-                                )
-                              : const Icon(Icons.inventory_2,
-                                  color: AppColors.primaryBlue),
-                        ),
-                        title: Text(
-                          '${item['name'] ?? 'Insumo'}$unit',
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 15),
-                        ),
-                        subtitle: Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            '${item['category'] ?? _supplierCategory}',
-                            style: const TextStyle(
-                                fontSize: 12, color: AppColors.subtitleGrey),
-                          ),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '\$${((item['price'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                                color: AppColors.primaryBlue,
+                          if (categories.length > 2) ...[
+                            const SizedBox(height: 12),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  children: categories.map((cat) {
+                                    final selected = _selectedCategory == cat;
+                                    return Padding(
+                                      padding: const EdgeInsets.only(right: 8),
+                                      child: ChoiceChip(
+                                        label: Text(cat),
+                                        selected: selected,
+                                        selectedColor: AppColors.navyDark,
+                                        labelStyle: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: selected
+                                              ? FontWeight.bold
+                                              : FontWeight.normal,
+                                          color: selected
+                                              ? Colors.white
+                                              : AppColors.navyDark,
+                                        ),
+                                        onSelected: (_) {
+                                          setState(
+                                              () => _selectedCategory = cat);
+                                        },
+                                      ),
+                                    );
+                                  }).toList(),
+                                ),
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            IconButton(
-                              icon: const Icon(Icons.edit_outlined,
-                                  size: 20, color: AppColors.primaryBlue),
-                              onPressed: () =>
-                                  _openProductDialog(productToEdit: item),
-                            ),
                           ],
-                        ),
+                        ],
                       ),
-                    );
-                  },
+                    ),
+
+                    // Grilla responsive de insumos
+                    Expanded(
+                      child: filteredProducts.isEmpty
+                          ? Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.inventory_2_outlined,
+                                      size: 64, color: Colors.grey.shade400),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    _products.isEmpty
+                                        ? 'Aún no tienes productos en tu catálogo'
+                                        : 'No hay insumos que coincidan con tu búsqueda',
+                                    style: const TextStyle(
+                                        fontSize: 16,
+                                        color: AppColors.subtitleGrey),
+                                  ),
+                                  const SizedBox(height: 14),
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppColors.navyDark),
+                                    onPressed: () => _openProductDialog(),
+                                    icon: const Icon(Icons.add,
+                                        color: AppColors.tealMint),
+                                    label: const Text(
+                                        'Publicar nuevo producto',
+                                        style: TextStyle(color: Colors.white)),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : LayoutBuilder(
+                              builder: (context, constraints) {
+                                int crossAxisCount = 1;
+                                double aspectRatio = 1.15;
+
+                                if (constraints.maxWidth >= 1000) {
+                                  crossAxisCount = 4;
+                                  aspectRatio = 0.78;
+                                } else if (constraints.maxWidth >= 720) {
+                                  crossAxisCount = 3;
+                                  aspectRatio = 0.80;
+                                } else if (constraints.maxWidth >= 480) {
+                                  crossAxisCount = 2;
+                                  aspectRatio = 0.82;
+                                }
+
+                                return GridView.builder(
+                                  padding:
+                                      const EdgeInsets.fromLTRB(20, 8, 20, 28),
+                                  gridDelegate:
+                                      SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: crossAxisCount,
+                                    crossAxisSpacing: 16,
+                                    mainAxisSpacing: 16,
+                                    childAspectRatio: aspectRatio,
+                                  ),
+                                  itemCount: filteredProducts.length,
+                                  itemBuilder: (ctx, i) =>
+                                      _buildProductCard(filteredProducts[i]),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
                 ),
+              ),
+            ),
+    );
+  }
+
+  Widget _buildStatBadge(String label, String value, Color accent) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: accent.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: accent.withOpacity(0.2)),
+      ),
+      child: Row(
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: accent,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: AppColors.navyDark,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
