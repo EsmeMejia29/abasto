@@ -10,6 +10,9 @@ import '../widgets/review_dialog.dart';
 import 'dart:ui_web' as ui_web;
 import 'dart:html' as html;
 import 'dart:async';
+import '../models/supplier.dart';
+import '../utils/csv_exporter.dart';
+import 'supplier_detail_screen.dart';
 
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
@@ -716,6 +719,221 @@ class _OrdersScreenState extends State<OrdersScreen> {
       );
   }
 
+  Future<void> _exportOrdersCsv() async {
+    try {
+      final orders = await _ordersFuture;
+      if (orders.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No hay pedidos para exportar.')),
+          );
+        }
+        return;
+      }
+
+      final rows = orders.map((o) {
+        final total = (o['total_amount'] as num?)?.toDouble() ?? 0.0;
+        final sub = (o['subtotal'] as num?)?.toDouble() ??
+            double.parse((total / 1.03).toStringAsFixed(2));
+        final neto = double.parse((sub / 1.13).toStringAsFixed(2));
+        final iva = double.parse((sub - neto).toStringAsFixed(2));
+        final fee = (o['platform_fee'] as num?)?.toDouble() ??
+            double.parse((total - sub).toStringAsFixed(2));
+        return [
+          o['code'] ?? '',
+          (o['created_at'] ?? '').toString().split('T').first,
+          o['supplier_name'] ?? 'Distribuidor',
+          _formatStatus((o['status'] ?? '').toString()),
+          (o['tax_document_type'] ?? 'factura').toString().toUpperCase(),
+          o['dte_generation_code'] ?? 'Pendiente',
+          neto.toStringAsFixed(2),
+          iva.toStringAsFixed(2),
+          fee.toStringAsFixed(2),
+          total.toStringAsFixed(2),
+        ];
+      }).toList();
+
+      CsvExporter.downloadCsv(
+        filename: 'Abasto_Compras_Contabilidad_${DateTime.now().year}.csv',
+        headers: [
+          'Orden',
+          'Fecha',
+          'Distribuidor',
+          'Estado',
+          'Tipo DTE',
+          'Codigo Generacion DTE',
+          'Neto Gravado (\$)',
+          'IVA 13% (\$)',
+          'Tarifa Abasto 3% (\$)',
+          'Total Pagado (\$)',
+        ],
+        rows: rows,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Error al exportar CSV: $e'),
+              backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _repeatOrder(Map<String, dynamic> order) async {
+    final supplierId = order['supplier_id']?.toString() ?? '';
+    if (supplierId.isEmpty) return;
+
+    final items = (order['order_items'] as List<dynamic>?) ?? [];
+    final Map<String, int> initialQty = {};
+    for (var it in items) {
+      final pid = it['product_id']?.toString() ?? '';
+      final q = (it['quantity'] as num?)?.toInt() ?? 0;
+      if (pid.isNotEmpty && q > 0) {
+        initialQty[pid] = (initialQty[pid] ?? 0) + q;
+      }
+    }
+
+    try {
+      final prof = await supabase
+          .from('profiles')
+          .select('id, business_name, location, avatar_url, business_hours, is_verified')
+          .eq('id', supplierId)
+          .maybeSingle();
+
+      final suppDet = await supabase
+          .from('supplier_details')
+          .select('category, rating, reviews_count')
+          .eq('profile_id', supplierId)
+          .maybeSingle();
+
+      if (!mounted) return;
+
+      final supplier = Supplier(
+        id: supplierId,
+        name: prof?['business_name'] ?? order['supplier_name'] ?? 'Distribuidor',
+        category: suppDet?['category'] ?? 'Insumos Generales',
+        rating: (suppDet?['rating'] as num?)?.toDouble() ?? 5.0,
+        reviewsCount: (suppDet?['reviews_count'] as num?)?.toInt() ?? 0,
+        location: prof?['location'] ?? 'El Salvador',
+        deliveryDays: 'Lunes a Sábado',
+        avatarUrl: prof?['avatar_url'],
+        businessHours: prof?['business_hours'] ?? 'Lunes a Sábado',
+        isVerified: prof?['is_verified'] == true,
+      );
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SupplierDetailScreen(
+            supplier: supplier,
+            initialQuantities: initialQty,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('No se pudo cargar el catálogo: $e'),
+              backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _reportIncidentDialog(Map<String, dynamic> order) async {
+    final noteCtrl = TextEditingController();
+    final submitted = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reportar Incidencia / Faltante',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Orden ${order['code']} • ${order['supplier_name'] ?? ''}',
+              style: const TextStyle(
+                  fontSize: 12, color: AppColors.subtitleGrey),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Al reportar un faltante o producto dañado, la liquidación de este pedido quedará retenida hasta que el distribuidor lo resuelva contigo.',
+              style: TextStyle(fontSize: 12, height: 1.35),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: noteCtrl,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Detalle del problema',
+                hintText: 'Ej. Faltaron 2 cajas de queso o llegaron dañadas...',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.deepOrange),
+            onPressed: () {
+              if (noteCtrl.text.trim().isEmpty) return;
+              Navigator.pop(ctx, true);
+            },
+            child: const Text('Enviar Reporte',
+                style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (submitted == true) {
+      try {
+        final currentHistory =
+            (order['status_history'] as List<dynamic>?) ?? [];
+        final newHistory = List<dynamic>.from(currentHistory)
+          ..add({
+            'status': 'incidencia',
+            'changed_at': DateTime.now().toUtc().toIso8601String(),
+            'note': 'Incidencia reportada: ${noteCtrl.text.trim()}',
+          });
+
+        await supabase.from('orders').update({
+          'has_incident': true,
+          'incident_status': 'abierta',
+          'incident_note': noteCtrl.text.trim(),
+          'incident_reported_at': DateTime.now().toUtc().toIso8601String(),
+          'status_history': newHistory,
+        }).eq('id', order['id']);
+
+        _refresh();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                  'Incidencia enviada. Liquidación retenida hasta su resolución.'),
+              backgroundColor: Colors.deepOrange,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text('Error al reportar: $e'),
+                backgroundColor: Colors.red),
+          );
+        }
+      }
+    }
+  }
+
   Widget _buildOrderCard(Map<String, dynamic> order) {
     final code = order['code'] ?? 'ORD-000';
     final supplierName = order['supplier_name'] ?? 'PRUEBA';
@@ -1026,8 +1244,78 @@ class _OrdersScreenState extends State<OrdersScreen> {
               },
             ),
 
+            if (order['has_incident'] == true) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF7ED),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFFB923C)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.report_problem_outlined,
+                        size: 16, color: Colors.deepOrange),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Incidencia abierta (liquidación retenida): ${order['incident_note'] ?? ''}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF9A3412),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            if (!isPendiente) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.primaryBlue,
+                        side: const BorderSide(color: AppColors.primaryBlue),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
+                      icon: const Icon(Icons.replay_rounded, size: 16),
+                      label: const Text('Repetir Pedido',
+                          style: TextStyle(fontSize: 12)),
+                      onPressed: () => _repeatOrder(order),
+                    ),
+                  ),
+                  if (status.toLowerCase() == 'entregado' &&
+                      order['has_incident'] != true) ...[
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.deepOrange,
+                          side: const BorderSide(color: Colors.deepOrange),
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
+                        icon: const Icon(Icons.report_problem_outlined,
+                            size: 16),
+                        label: const Text('Reportar Faltante',
+                            style: TextStyle(fontSize: 12)),
+                        onPressed: () => _reportIncidentDialog(order),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+
             if (status.toLowerCase() == 'entregado') ...[
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
@@ -1090,6 +1378,11 @@ class _OrdersScreenState extends State<OrdersScreen> {
               ),
             ),
           ),
+          IconButton(
+            tooltip: 'Exportar Reporte Contable (CSV / Excel)',
+            icon: const Icon(Icons.download_rounded),
+            onPressed: _exportOrdersCsv,
+          ),
           IconButton(icon: const Icon(Icons.refresh), onPressed: _refresh),
         ],
       ),
@@ -1141,7 +1434,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                         crossAxisCount: 2,
                         crossAxisSpacing: 18,
                         mainAxisSpacing: 18,
-                        mainAxisExtent: 430,
+                        mainAxisExtent: 495,
                       ),
                       itemCount: orders.length,
                       itemBuilder: (context, index) =>

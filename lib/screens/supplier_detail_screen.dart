@@ -9,8 +9,13 @@ import '../widgets/business_info_sheet.dart';
 
 class SupplierDetailScreen extends StatefulWidget {
   final Supplier supplier;
+  final Map<String, int>? initialQuantities;
 
-  const SupplierDetailScreen({super.key, required this.supplier});
+  const SupplierDetailScreen({
+    super.key,
+    required this.supplier,
+    this.initialQuantities,
+  });
 
   @override
   State<SupplierDetailScreen> createState() => _SupplierDetailScreenState();
@@ -30,17 +35,34 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
   String _selectedCategory = 'Todos';
   List<String> _supplierCategories = ['Todos'];
   int _freeCredits = 0;
+  double _minOrderAmount = 0.0;
+  final Map<String, int?> _productStocks = {};
+  final Map<String, List<Map<String, dynamic>>> _productTiers = {};
   String _selectedTaxDoc = 'ccf'; // 'ccf' (Crédito Fiscal) o 'factura' (Consumidor Final)
   bool _hasCompleteTaxProfile = false;
 
   @override
   void initState() {
     super.initState();
+    if (widget.initialQuantities != null) {
+      _selectedQuantities.addAll(widget.initialQuantities!);
+    }
     _productsFuture = _fetchProducts();
     _loadFreeCredits();
   }
 
   Future<void> _loadFreeCredits() async {
+    final suppDet = await supabase
+          .from('supplier_details')
+          .select('min_order_amount')
+          .eq('profile_id', widget.supplier.id)
+          .maybeSingle();
+      if (mounted && suppDet != null) {
+        setState(() {
+          _minOrderAmount =
+              (suppDet['min_order_amount'] as num?)?.toDouble() ?? 0.0;
+        });
+      }
     try {
       final uid = supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
       final res = await supabase
@@ -100,6 +122,22 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
           : basePrice;
       baseMap['price'] = customerPrice;
 
+      final prodId = baseMap['id'].toString();
+      _productStocks[prodId] = (baseMap['stock_quantity'] as num?)?.toInt();
+
+      final rawTiers = (baseMap['bulk_tiers'] as List<dynamic>?) ?? [];
+      _productTiers[prodId] = rawTiers.map((t) {
+        final baseTierPrice = (t['price'] as num?)?.toDouble() ?? basePrice;
+        final customerTierPrice = apply3Pct
+            ? double.parse(
+                (baseTierPrice * (1 + _platformFeeRate)).toStringAsFixed(2))
+            : baseTierPrice;
+        return {
+          'min_qty': (t['min_qty'] as num?)?.toInt() ?? 1,
+          'price': customerTierPrice,
+        };
+      }).toList();
+
       return Product.fromMap(baseMap);
     }).toList();
 
@@ -129,9 +167,11 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     double total = 0.0;
     for (var product in _allProducts) {
       final qty = _selectedQuantities[product.id] ?? 0;
-      total += qty * product.price;
+      if (qty > 0) {
+        total += qty * _effectiveUnitPrice(product, qty);
+      }
     }
-    return total;
+    return double.parse(total.toStringAsFixed(2));
   }
 
   int _totalItemsCount() {
@@ -220,11 +260,16 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
             'product_id': product.id,
             'product_name': product.name,
             'quantity': qty,
-            'unit_price': product.price,
+            'unit_price': _effectiveUnitPrice(product, qty),
           });
         }
       }
       await supabase.from('order_items').insert(itemsToInsert);
+      try {
+        await supabase.rpc('decrement_product_stock', params: {
+          'p_order_id': orderId,
+        });
+      } catch (_) {}
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -265,7 +310,8 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
 
           double currentTotal = 0.0;
           for (var p in selectedProducts) {
-            currentTotal += (_selectedQuantities[p.id] ?? 0) * p.price;
+            final q = _selectedQuantities[p.id] ?? 0;
+            currentTotal += q * _effectiveUnitPrice(p, q);
           }
 
           return Container(
@@ -343,7 +389,9 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                       itemBuilder: (_, index) {
                         final product = selectedProducts[index];
                         final qty = _selectedQuantities[product.id] ?? 0;
-                        final itemTotal = qty * product.price;
+                        final unitPrice = _effectiveUnitPrice(product, qty);
+                        final itemTotal = qty * unitPrice;
+                        final int? maxStock = _productStocks[product.id];
 
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 8),
@@ -364,7 +412,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                                       ),
                                     ),
                                     Text(
-                                      '\$${product.price.toStringAsFixed(2)} • ${product.unit}',
+                                      '\$${unitPrice.toStringAsFixed(2)} • ${product.unit}',
                                       style: const TextStyle(
                                         fontSize: 12,
                                         color: AppColors.subtitleGrey,
@@ -397,15 +445,21 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                                   IconButton(
                                     iconSize: 20,
                                     splashRadius: 20,
-                                    icon: const Icon(Icons.add_circle_outline,
-                                        color: AppColors.primaryBlue),
-                                    onPressed: () {
-                                      setState(() {
-                                        _selectedQuantities[product.id] =
-                                            qty + 1;
-                                      });
-                                      setModalState(() {});
-                                    },
+                                    icon: Icon(
+                                      Icons.add_circle_outline,
+                                      color: (maxStock != null && qty >= maxStock)
+                                          ? Colors.grey
+                                          : AppColors.primaryBlue,
+                                    ),
+                                    onPressed: (maxStock != null && qty >= maxStock)
+                                        ? null
+                                        : () {
+                                            setState(() {
+                                              _selectedQuantities[product.id] =
+                                                  qty + 1;
+                                            });
+                                            setModalState(() {});
+                                          },
                                   ),
                                 ],
                               ),
@@ -674,6 +728,53 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                 ),
                 const SizedBox(height: 14),
 
+                if (_minOrderAmount > 0 && currentTotal < _minOrderAmount) ...[
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF3C7),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFF59E0B)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.info_outline,
+                            size: 18, color: Color(0xFFB45309)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Pedido mínimo del distribuidor: \$${_minOrderAmount.toStringAsFixed(2)}. Te faltan \$${(_minOrderAmount - currentTotal).toStringAsFixed(2)} para confirmar.',
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFFB45309),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
+                if (selectedProducts.isNotEmpty) ...[
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _saveCurrentCartAsTemplate();
+                      },
+                      icon: const Icon(Icons.bookmark_add_outlined, size: 17),
+                      label: const Text(
+                        'Guardar como lista semanal',
+                        style: TextStyle(fontSize: 12.5),
+                      ),
+                    ),
+                  ),
+                ],
+
                 SizedBox(
                   width: double.infinity,
                   height: 46,
@@ -685,7 +786,10 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                         borderRadius: BorderRadius.circular(10),
                       ),
                     ),
-                    onPressed: selectedProducts.isEmpty || _isSubmitting
+                    onPressed: selectedProducts.isEmpty ||
+                            _isSubmitting ||
+                            (_minOrderAmount > 0 &&
+                                currentTotal < _minOrderAmount)
                         ? null
                         : () {
                             Navigator.pop(ctx);
@@ -705,6 +809,171 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
         },
       ),
     );
+  }
+
+  Future<void> _saveCurrentCartAsTemplate() async {
+    final nameCtrl = TextEditingController();
+    final templateName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Guardar Lista Recurrente',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: nameCtrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Nombre de la lista',
+            hintText: 'Ej. Pedido Lunes Lácteos / Semanal',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primaryBlue,
+                foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, nameCtrl.text.trim()),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+
+    if (templateName == null || templateName.isEmpty) return;
+
+    try {
+      final uid = supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
+      final items = _selectedQuantities.entries
+          .where((e) => e.value > 0)
+          .map((e) => {'product_id': e.key, 'quantity': e.value})
+          .toList();
+
+      await supabase.from('restaurant_order_templates').insert({
+        'restaurant_id': uid,
+        'supplier_id': widget.supplier.id,
+        'name': templateName,
+        'items': items,
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Plantilla "$templateName" guardada'),
+            backgroundColor: AppColors.tealMint,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Error guardando plantilla: $e'),
+              backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _openTemplatesSheet() async {
+    final uid = supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
+    final res = await supabase
+        .from('restaurant_order_templates')
+        .select('*')
+        .eq('restaurant_id', uid)
+        .eq('supplier_id', widget.supplier.id)
+        .order('created_at', ascending: false);
+
+    final templates = (res as List<dynamic>)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Listas Recurrentes para este Proveedor',
+              style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.navyDark),
+            ),
+            const SizedBox(height: 12),
+            if (templates.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: Text(
+                  'Aún no tienes listas guardadas aquí. Arma un carrito y tócalo para guardar tu plantilla semanal.',
+                  style: TextStyle(fontSize: 13, color: AppColors.subtitleGrey),
+                ),
+              )
+            else
+              ...templates.map((tpl) {
+                final items = (tpl['items'] as List<dynamic>?) ?? [];
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.playlist_add_check_rounded,
+                      color: AppColors.primaryBlue),
+                  title: Text(tpl['name'] ?? 'Lista',
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text('${items.length} productos configurados'),
+                  trailing: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.navyDark,
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _selectedQuantities.clear();
+                        for (var it in items) {
+                          final pid = it['product_id'].toString();
+                          final q = (it['quantity'] as num).toInt();
+                          final maxStock = _productStocks[pid];
+                          if (_allProducts.any((p) => p.id == pid)) {
+                            _selectedQuantities[pid] =
+                                maxStock != null ? q.clamp(0, maxStock) : q;
+                          }
+                        }
+                      });
+                      Navigator.pop(ctx);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Lista "${tpl['name']}" cargada al carrito'),
+                          backgroundColor: AppColors.tealMint,
+                        ),
+                      );
+                    },
+                    child: const Text('Cargar'),
+                  ),
+                );
+              }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  double _effectiveUnitPrice(Product product, int qty) {
+    double price = product.price;
+    final tiers = _productTiers[product.id] ?? [];
+    for (var t in tiers) {
+      if (qty >= (t['min_qty'] as int)) {
+        price = (t['price'] as double);
+      }
+    }
+    return price;
   }
 
   Widget _buildSupplierHeader() {
@@ -870,6 +1139,10 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
   Widget _buildGridProductCard(Product product) {
     final qty = _selectedQuantities[product.id] ?? 0;
     final bool hasSelection = qty > 0;
+    final int? maxStock = _productStocks[product.id];
+    final tiers = _productTiers[product.id] ?? [];
+    final double unitPrice = _effectiveUnitPrice(product, qty > 0 ? qty : 1);
+    final bool hasTierDiscount = unitPrice < product.price;
 
     return Container(
       decoration: BoxDecoration(
@@ -966,17 +1239,17 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                 Row(
                   children: [
                     Text(
-                      '\$${product.price.toStringAsFixed(2)}',
+                      '\$${unitPrice.toStringAsFixed(2)}',
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 15,
                         color: AppColors.primaryBlue,
                       ),
                     ),
-                    if (_freeCredits > 0) ...[
+                    if (hasTierDiscount || _freeCredits > 0) ...[
                       const SizedBox(width: 6),
                       Text(
-                        '\$${(product.price * (1 + _platformFeeRate)).toStringAsFixed(2)}',
+                        '\$${(hasTierDiscount ? product.price : (product.price * (1 + _platformFeeRate))).toStringAsFixed(2)}',
                         style: const TextStyle(
                           fontSize: 11.5,
                           decoration: TextDecoration.lineThrough,
@@ -986,6 +1259,21 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                     ],
                   ],
                 ),
+                if (tiers.isNotEmpty)
+                  Text(
+                    hasTierDiscount
+                        ? '¡Precio mayoreo aplicado!'
+                        : '${tiers.first['min_qty']}+ unid. a \$${(tiers.first['price'] as double).toStringAsFixed(2)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: hasTierDiscount
+                          ? const Color(0xFF0F766E)
+                          : AppColors.primaryBlue,
+                    ),
+                  ),
                 const SizedBox(height: 6),
 
                 // Selector de cantidad
@@ -1023,12 +1311,19 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                         iconSize: 16,
-                        icon: const Icon(Icons.add, color: AppColors.primaryBlue),
-                        onPressed: () {
-                          setState(() {
-                            _selectedQuantities[product.id] = qty + 1;
-                          });
-                        },
+                        icon: Icon(
+                          Icons.add,
+                          color: (maxStock != null && qty >= maxStock)
+                              ? Colors.grey
+                              : AppColors.primaryBlue,
+                        ),
+                        onPressed: (maxStock != null && qty >= maxStock)
+                            ? null
+                            : () {
+                                setState(() {
+                                  _selectedQuantities[product.id] = qty + 1;
+                                });
+                              },
                       ),
                     ],
                   ),
@@ -1051,6 +1346,11 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
       appBar: AppBar(
         title: Text(widget.supplier.name),
         actions: [
+          IconButton(
+            tooltip: 'Mis Listas / Plantillas Semanales',
+            icon: const Icon(Icons.bookmark_border_rounded),
+            onPressed: _openTemplatesSheet,
+          ),
           IconButton(
             tooltip: 'Ver información y reseñas',
             icon: const Icon(Icons.info_outline),

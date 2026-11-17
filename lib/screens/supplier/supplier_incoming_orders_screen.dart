@@ -14,6 +14,7 @@ import '../../widgets/review_dialog.dart';
 import 'supplier_bank_settings_screen.dart';
 
 import '../../services/notification_service.dart';
+import '../../utils/csv_exporter.dart';
 
 class SupplierIncomingOrdersScreen extends StatefulWidget {
   const SupplierIncomingOrdersScreen({super.key});
@@ -341,8 +342,9 @@ class _SupplierIncomingOrdersScreenState
     for (var ord in allOrders) {
       final st = (ord['status'] ?? '').toString().toLowerCase();
       final ordId = ord['id'].toString();
+      final bool hasIncident = ord['has_incident'] == true;
 
-      if (st == 'entregado' && !_paidOrderIds.contains(ordId)) {
+      if (st == 'entregado' && !hasIncident && !_paidOrderIds.contains(ordId)) {
         final totalAmount = (ord['total_amount'] as num?)?.toDouble() ?? 0.0;
         final baseInsumos = (ord['subtotal'] as num?)?.toDouble() ??
             double.parse((totalAmount / 1.03).toStringAsFixed(2));
@@ -1609,6 +1611,138 @@ class _SupplierIncomingOrdersScreenState
     );
   }
 
+  Future<void> _exportSupplierSalesCsv() async {
+    try {
+      final allOrders = await _ordersFuture;
+      if (allOrders.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No hay pedidos para exportar.')),
+          );
+        }
+        return;
+      }
+
+      final rows = allOrders.map((ord) {
+        final totalAmount = (ord['total_amount'] as num?)?.toDouble() ?? 0.0;
+        final baseInsumos = (ord['subtotal'] as num?)?.toDouble() ??
+            double.parse((totalAmount / 1.03).toStringAsFixed(2));
+        final bool isSupplierFree = ord['supplier_commission_free'] == true;
+        final commission = isSupplierFree
+            ? 0.0
+            : double.parse(
+                (baseInsumos * _supplierCommissionRate).toStringAsFixed(2));
+        final netEarnings =
+            double.parse((baseInsumos - commission).toStringAsFixed(2));
+        final isLiquidado = _paidOrderIds.contains(ord['id'].toString());
+
+        return [
+          ord['code'] ?? '',
+          (ord['created_at'] ?? '').toString().split('T').first,
+          ord['restaurant_name'] ?? 'Restaurante',
+          _formatStatus((ord['status'] ?? '').toString()),
+          (ord['tax_document_type'] ?? 'factura').toString().toUpperCase(),
+          ord['dte_generation_code'] ?? 'Pendiente',
+          baseInsumos.toStringAsFixed(2),
+          commission.toStringAsFixed(2),
+          netEarnings.toStringAsFixed(2),
+          ord['has_incident'] == true
+              ? 'Retenido por Incidencia'
+              : (isLiquidado ? 'Liquidado' : 'Pendiente'),
+        ];
+      }).toList();
+
+      CsvExporter.downloadCsv(
+        filename: 'Abasto_Ventas_Distribuidor_${DateTime.now().year}.csv',
+        headers: [
+          'Orden',
+          'Fecha',
+          'Restaurante',
+          'Estado',
+          'Tipo DTE',
+          'Codigo DTE',
+          'Venta Base IVA Incl (\$)',
+          'Retencion Abasto 5% (\$)',
+          'Neto a Recibir (\$)',
+          'Estado Liquidacion',
+        ],
+        rows: rows,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Error al exportar CSV: $e'),
+              backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _resolveIncident(Map<String, dynamic> order) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('¿Marcar Incidencia como Resuelta?',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        content: Text(
+          'Confirma que ya acordaste la reposición o nota de crédito con ${order['restaurant_name']} para la orden ${order['code']}. Esto habilitará el pedido para liquidación el viernes.',
+          style: const TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF16A34A)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Sí, Liberar Pedido',
+                style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        final currentHistory =
+            (order['status_history'] as List<dynamic>?) ?? [];
+        final newHistory = List<dynamic>.from(currentHistory)
+          ..add({
+            'status': 'entregado',
+            'changed_at': DateTime.now().toUtc().toIso8601String(),
+            'note': 'Incidencia resuelta por el distribuidor',
+          });
+
+        await supabase.from('orders').update({
+          'has_incident': false,
+          'incident_status': 'resuelta',
+          'status_history': newHistory,
+        }).eq('id', order['id'].toString());
+
+        _refresh();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Incidencia resuelta. Pedido habilitado para corte.'),
+              backgroundColor: AppColors.tealMint,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text('Error al actualizar: $e'),
+                backgroundColor: Colors.red),
+          );
+        }
+      }
+    }
+  }
+
   Widget _buildOrderCard(Map<String, dynamic> order) {
     final code = order['code'] ?? 'ORD-000';
     final restaurantName = order['restaurant_name'] ?? 'Restaurante';
@@ -1900,7 +2034,65 @@ class _SupplierIncomingOrdersScreenState
               ],
             ),
 
-            if (status.toLowerCase() == 'entregado') ...[
+            if (order['has_incident'] == true) ...[
+              const SizedBox(height: 6),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF2F2),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFFCA5A5)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.report_problem,
+                            size: 15, color: Colors.red),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Incidencia del restaurante: ${order['incident_note'] ?? ''}',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF991B1B),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        icon: const Icon(Icons.check_circle_outline,
+                            size: 14, color: Color(0xFF16A34A)),
+                        label: const Text(
+                          'Marcar Incidencia Resuelta',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF16A34A),
+                          ),
+                        ),
+                        onPressed: () => _resolveIncident(order),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else if (status.toLowerCase() == 'entregado') ...[
               const SizedBox(height: 6),
               Container(
                 width: double.infinity,
@@ -2123,6 +2315,11 @@ class _SupplierIncomingOrdersScreenState
       appBar: AppBar(
         title: const Text('Despacho de Pedidos'),
         actions: [
+          IconButton(
+            tooltip: 'Exportar Ventas Contabilidad (CSV)',
+            icon: const Icon(Icons.download_rounded),
+            onPressed: _exportSupplierSalesCsv,
+          ),
           IconButton(icon: const Icon(Icons.refresh), onPressed: _refresh),
         ],
       ),
@@ -2261,7 +2458,7 @@ class _SupplierIncomingOrdersScreenState
                                     crossAxisCount: 2,
                                     crossAxisSpacing: 18,
                                     mainAxisSpacing: 18,
-                                    mainAxisExtent: 475,
+                                    mainAxisExtent: 515,
                                   ),
                                   itemCount: filteredOrders.length,
                                   itemBuilder: (context, index) =>

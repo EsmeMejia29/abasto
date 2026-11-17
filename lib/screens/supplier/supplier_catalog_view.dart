@@ -132,6 +132,21 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
     final unitCtrl = TextEditingController(
       text: productToEdit?['unit']?.toString() ?? '1 unidad',
     );
+    final stockCtrl = TextEditingController(
+      text: productToEdit?['stock_quantity'] != null
+          ? productToEdit!['stock_quantity'].toString()
+          : '',
+    );
+
+    final rawTiers = (productToEdit?['bulk_tiers'] as List<dynamic>?) ?? [];
+    final List<Map<String, TextEditingController>> tierControllers = rawTiers
+        .map((t) => {
+              'min_qty': TextEditingController(
+                  text: (t['min_qty'] ?? '').toString()),
+              'price': TextEditingController(
+                  text: (t['price'] as num?)?.toStringAsFixed(2) ?? ''),
+            })
+        .toList();
 
 
     final Set<String> categoriesSet = {_supplierCategory, ..._defaultCategories};
@@ -330,6 +345,98 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
                         }
                       },
                     ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: stockCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Stock disponible (Opcional)',
+                        hintText: 'Vacío = ilimitado (se pausa al llegar a 0)',
+                        prefixIcon: Icon(Icons.inventory_outlined),
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Precios por Volumen / Mayoreo',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.navyDark,
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: () {
+                            setModalState(() {
+                              tierControllers.add({
+                                'min_qty': TextEditingController(),
+                                'price': TextEditingController(),
+                              });
+                            });
+                          },
+                          icon: const Icon(Icons.add_circle_outline, size: 16),
+                          label: const Text('Agregar escala',
+                              style: TextStyle(fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                    if (tierControllers.isEmpty)
+                      const Text(
+                        'Sin escalas: se aplicará el precio base para cualquier cantidad.',
+                        style: TextStyle(
+                            fontSize: 11.5, color: AppColors.subtitleGrey),
+                      )
+                    else
+                      ...tierControllers.asMap().entries.map((entry) {
+                        final idx = entry.key;
+                        final tc = entry.value;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: tc['min_qty'],
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Desde (cant.)',
+                                    hintText: 'Ej. 5',
+                                    isDense: true,
+                                    border: OutlineInputBorder(),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: TextField(
+                                  controller: tc['price'],
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
+                                          decimal: true),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Precio c/u (\$)',
+                                    hintText: 'Ej. 9.50',
+                                    isDense: true,
+                                    border: OutlineInputBorder(),
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline,
+                                    color: Colors.redAccent, size: 20),
+                                onPressed: () {
+                                  setModalState(() {
+                                    tierControllers.removeAt(idx);
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
                   ],
                 ),
               ),
@@ -424,12 +531,31 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
                             }
                           }
 
+                          final parsedStock =
+                              int.tryParse(stockCtrl.text.trim());
+                          final parsedTiers = <Map<String, dynamic>>[];
+                          for (var tc in tierControllers) {
+                            final minQ =
+                                int.tryParse(tc['min_qty']!.text.trim()) ?? 0;
+                            final tierP =
+                                double.tryParse(tc['price']!.text.trim()) ??
+                                    0.0;
+                            if (minQ > 1 && tierP > 0) {
+                              parsedTiers
+                                  .add({'min_qty': minQ, 'price': tierP});
+                            }
+                          }
+                          parsedTiers.sort((a, b) => (a['min_qty'] as int)
+                              .compareTo(b['min_qty'] as int));
+
                           final Map<String, dynamic> payload = {
                             'name': name,
                             'price': price,
                             'unit': unit,
                             'category': selectedCategory,
-                            'is_available': true,
+                            'stock_quantity': parsedStock,
+                            'bulk_tiers': parsedTiers,
+                            'is_available': parsedStock == null || parsedStock > 0,
                           };
 
                           if (finalImageUrl != null &&
@@ -623,6 +749,38 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
                       color: AppColors.subtitleGrey,
                     ),
                   ),
+                  if (item['stock_quantity'] != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'Stock disponible: ${item['stock_quantity']} unid.',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: (item['stock_quantity'] as int) <= 5
+                          ? Colors.orange.shade800
+                          : const Color(0xFF0F766E),
+                    ),
+                  ),
+                ],
+                if (((item['bulk_tiers'] as List<dynamic>?) ?? []).isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEFF6FF),
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    child: Text(
+                      'Mayoreo desde ${(item['bulk_tiers'] as List).first['min_qty']} unid.',
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primaryBlue,
+                      ),
+                    ),
+                  ),
+                ],
                 ],
                 const Divider(height: 18),
                 Row(

@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../main.dart';
 import '../welcome_screen.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/csv_exporter.dart';
 
 class AdminSettlementsScreen extends StatefulWidget {
   const AdminSettlementsScreen({super.key});
@@ -107,6 +108,8 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
           subtotal,
           platform_fee,
           status, 
+          has_incident,
+          incident_note,
           created_at,
           order_items (*)
         ''')
@@ -115,8 +118,24 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
 
     final allRelevantOrders = List<Map<String, dynamic>>.from(ordersRes);
 
-    // REGLA 1 (Distribuidores): Solo se liquidan órdenes efectivamente 'entregado'
-    final deliveredOrders = allRelevantOrders.where((o) => o['status'] == 'entregado').toList();
+    // Órdenes retenidas por incidencia abierta
+    final disputedOrders = allRelevantOrders
+        .where((o) => o['has_incident'] == true)
+        .map((o) => {
+              ...o,
+              'supplier_name':
+                  supplierNamesMap[o['supplier_id']?.toString() ?? ''] ??
+                      'Distribuidor',
+              'restaurant_name':
+                  restaurantNamesMap[o['restaurant_id']?.toString() ?? ''] ??
+                      'Restaurante',
+            })
+        .toList();
+
+    // REGLA 1 (Distribuidores): Solo se liquidan órdenes 'entregado' SIN incidencia abierta
+    final deliveredOrders = allRelevantOrders
+        .where((o) => o['status'] == 'entregado' && o['has_incident'] != true)
+        .toList();
 
     // REGLA 2 (Restaurantes): Muestra todas las órdenes pagadas ('confirmado' y 'entregado')
     final restaurantPaidOrders = allRelevantOrders;
@@ -354,6 +373,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
       'orderDatesIso': orderDatesIso,
       'paymentDatesIso': paymentDatesIso,
       'ordersByDate': ordersByDate,
+      'disputedOrders': disputedOrders,
       'nextFriday': _getNextPayoutFriday(),
     };
   }
@@ -660,6 +680,56 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
             SnackBar(content: Text('Error al procesar: $e'), backgroundColor: Colors.red),
           );
         }
+      }
+    }
+  }
+
+  Future<void> _exportFridaySettlementCsv() async {
+    try {
+      final data = await _dataFuture;
+      final suppliers = (data['suppliers'] as List<dynamic>? ?? [])
+          .cast<Map<String, dynamic>>();
+      final rows = suppliers.map((s) {
+        return [
+          s['business_name'] ?? '',
+          s['nrc_nit'] ?? '',
+          s['bank_name'] ?? '',
+          s['account_type'] ?? '',
+          s['account_number'] ?? '',
+          s['holder_name'] ?? '',
+          s['pending_orders_count'] ?? 0,
+          (s['pending_gross'] as double).toStringAsFixed(2),
+          (s['pending_fee'] as double).toStringAsFixed(2),
+          (s['pending_net'] as double).toStringAsFixed(2),
+          (s['already_paid_net'] as double).toStringAsFixed(2),
+        ];
+      }).toList();
+
+      CsvExporter.downloadCsv(
+        filename:
+            'Abasto_Corte_Liquidaciones_${DateTime.now().toIso8601String().split('T').first}.csv',
+        headers: [
+          'Distribuidora',
+          'Registro Fiscal',
+          'Banco',
+          'Tipo Cuenta',
+          'Numero Cuenta',
+          'Titular',
+          'Pedidos Pendientes',
+          'Ventas Base (\$)',
+          'Comision 5% (\$)',
+          'Neto a Transferir (\$)',
+          'Historico Liquidado (\$)',
+        ],
+        rows: rows,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Error exportando corte: $e'),
+              backgroundColor: Colors.red),
+        );
       }
     }
   }
@@ -1138,9 +1208,52 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
       return matchesQuery && matchesStatus && matchesWeek;
     }).toList();
 
+    final disputedOrders = (data['disputedOrders'] as List<dynamic>? ?? [])
+        .cast<Map<String, dynamic>>();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (disputedOrders.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEF2F2),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFFCA5A5)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.gpp_maybe_outlined,
+                        color: Colors.red, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Pedidos Retenidos de Liquidación por Incidencia (${disputedOrders.length})',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13.5,
+                        color: Color(0xFF991B1B),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                ...disputedOrders.map((d) => Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Text(
+                        '• ${d['code']} (${d['restaurant_name']} → ${d['supplier_name']}): ${d['incident_note'] ?? ''}',
+                        style: const TextStyle(
+                            fontSize: 12, color: Color(0xFF7F1D1D)),
+                      ),
+                    )),
+              ],
+            ),
+          ),
+
         _buildBankReconciliationCard(data, isDesktop),
 
         Row(
@@ -1658,6 +1771,11 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
             title: Text(_currentNavIndex == 0 ? 'Liquidación a Distribuidores' : 'Cobranza y Restaurantes'),
             centerTitle: !isDesktop,
             actions: [
+              IconButton(
+                tooltip: 'Exportar Corte Viernes (CSV)',
+                icon: const Icon(Icons.download_rounded),
+                onPressed: _exportFridaySettlementCsv,
+              ),
               IconButton(tooltip: 'Actualizar saldos', icon: const Icon(Icons.refresh), onPressed: _refresh),
             ],
           ),
