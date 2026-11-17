@@ -3,6 +3,8 @@ import 'dart:html' as html;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/services.dart';
+
 import '../../main.dart';
 import '../../models/order.dart';
 import '../../theme/app_theme.dart';
@@ -173,7 +175,13 @@ class _SupplierIncomingOrdersScreenState
           o['restaurant_name'] = resolvedName.toString().trim();
         }
 
-        // 2. NRC / NIT
+        // 2. Datos Fiscales DTE (Razón Social, NRC, NIT, Giro)
+        o['restaurant_legal_name'] =
+            prof?['legal_name'] ?? o['restaurant_name'];
+        o['restaurant_nrc'] = prof?['nrc'] ?? '';
+        o['restaurant_nit_only'] = prof?['nit'] ?? det?['nit'] ?? '';
+        o['restaurant_activity'] =
+            prof?['economic_activity'] ?? det?['restaurant_type'] ?? 'Restaurante';
         o['restaurant_nit'] = prof?['nrc_nit'] ??
             det?['nrc_nit'] ??
             det?['nit'] ??
@@ -276,6 +284,18 @@ class _SupplierIncomingOrdersScreenState
 
   Future<void> _updateOrderStatus(
       Map<String, dynamic> order, String newStatus) async {
+    if ((order['status'] ?? '').toString().toLowerCase() == 'cancelado') {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Este pedido fue cancelado y ya no puede modificarse.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+      return;
+    }
+
     try {
       final orderId = order['id'].toString();
       final currentHistory =
@@ -938,25 +958,66 @@ class _SupplierIncomingOrdersScreenState
             ),
             const SizedBox(height: 14),
 
-            // DATOS FISCALES Y DE CONTACTO
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const CircleAvatar(
-                backgroundColor: Color(0xFFFFFBEB),
-                child: Icon(Icons.receipt_long,
-                    color: Color(0xFFD97706), size: 20),
+            // FICHA FISCAL DTE COMPLETA
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFFBEB),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFFDE68A)),
               ),
-              title: const Text('NRC / NIT para Facturación / DTE',
-                  style: TextStyle(
-                      fontSize: 11, color: AppColors.subtitleGrey)),
-              subtitle: Text(
-                rNit,
-                style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.navyDark),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.receipt_long,
+                          color: Color(0xFFD97706), size: 19),
+                      const SizedBox(width: 8),
+                      Text(
+                        (order['tax_document_type'] ?? 'factura') == 'ccf'
+                            ? 'Documento Solicitado: Crédito Fiscal (CCF / DTE-03)'
+                            : 'Documento Solicitado: Factura Electrónica (DTE-01)',
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF92400E),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 14, color: Color(0xFFFDE68A)),
+                  Text(
+                    'Razón Social: ${order['restaurant_legal_name'] ?? rName}',
+                    style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.navyDark),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'NRC: ${(order['restaurant_nrc'] ?? '').toString().isNotEmpty ? order['restaurant_nrc'] : rNit}',
+                    style: const TextStyle(
+                        fontSize: 12.5, color: AppColors.navyDark),
+                  ),
+                  if ((order['restaurant_nit_only'] ?? '').toString().isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      'NIT: ${order['restaurant_nit_only']}',
+                      style: const TextStyle(
+                          fontSize: 12.5, color: AppColors.navyDark),
+                    ),
+                  ],
+                  const SizedBox(height: 3),
+                  Text(
+                    'Giro: ${order['restaurant_activity'] ?? rType}',
+                    style: const TextStyle(
+                        fontSize: 12, color: AppColors.subtitleGrey),
+                  ),
+                ],
               ),
             ),
+            const SizedBox(height: 10),
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const CircleAvatar(
@@ -1021,6 +1082,533 @@ class _SupplierIncomingOrdersScreenState
     );
   }
 
+  void _showFiscalBillingGuideModal(Map<String, dynamic> order) {
+    final bool isCcf = (order['tax_document_type'] ?? 'factura') == 'ccf';
+    final String docTitle = isCcf
+        ? 'Comprobante de Crédito Fiscal (CCF / DTE-03)'
+        : 'Factura Electrónica (Consumidor Final / DTE-01)';
+
+    final String legalName = (order['restaurant_legal_name'] ??
+            order['restaurant_name'] ??
+            'Cliente')
+        .toString();
+    final String nrc = (order['restaurant_nrc'] ?? '').toString().trim();
+    final String nit = (order['restaurant_nit_only'] ??
+            order['restaurant_nit'] ??
+            '')
+        .toString()
+        .trim();
+    final String activity =
+        (order['restaurant_activity'] ?? 'Restaurante').toString();
+    final String email = (order['restaurant_email'] ?? '').toString();
+    final String address = (order['restaurant_address'] ?? '').toString();
+
+    final double totalAmount = (order['total_amount'] as num?)?.toDouble() ?? 0.0;
+    final double baseInsumos = (order['subtotal'] as num?)?.toDouble() ??
+        double.parse((totalAmount / 1.03).toStringAsFixed(2));
+
+    // Desglose fiscal El Salvador (13% IVA incluido en catálogo)
+    final double valorNetoGravado =
+        double.parse((baseInsumos / 1.13).toStringAsFixed(2));
+    final double iva13 =
+        double.parse((baseInsumos - valorNetoGravado).toStringAsFixed(2));
+
+    Widget copyRow(String label, String value) {
+      final displayVal = value.isEmpty ? 'No registrado' : value;
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: const TextStyle(
+                          fontSize: 10.5, color: AppColors.subtitleGrey)),
+                  Text(
+                    displayVal,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.navyDark,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (value.isNotEmpty && value != 'Sin NIT / NRC registrado')
+              IconButton(
+                tooltip: 'Copiar $label',
+                icon: const Icon(Icons.copy_rounded,
+                    size: 16, color: AppColors.primaryBlue),
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: value));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('$label copiado'),
+                      duration: const Duration(seconds: 1),
+                      backgroundColor: AppColors.tealMint,
+                    ),
+                  );
+                },
+              ),
+          ],
+        ),
+      );
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.82,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (_, scrollController) => ListView(
+          controller: scrollController,
+          padding: const EdgeInsets.all(22),
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.receipt_long,
+                        color: isCcf
+                            ? const Color(0xFFB45309)
+                            : AppColors.primaryBlue,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          docTitle,
+                          style: const TextStyle(
+                            fontSize: 16.5,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.navyDark,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(ctx),
+                ),
+              ],
+            ),
+            Text(
+              'Orden ${order['code']} • Guía rápida para emisión en Hacienda',
+              style: const TextStyle(fontSize: 12, color: AppColors.subtitleGrey),
+            ),
+            const Divider(height: 20),
+
+            // 1. Datos del Receptor para copiar
+            const Text(
+              '1. Datos del Receptor (Toca el ícono para copiar)',
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.bold,
+                color: AppColors.navyDark,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Column(
+                children: [
+                  copyRow('Razón Social / Nombre', legalName),
+                  if (isCcf) ...[
+                    const Divider(height: 8),
+                    copyRow('NRC (Contribuyente IVA)', nrc),
+                  ],
+                  const Divider(height: 8),
+                  copyRow('NIT / DUI Homologado', nit),
+                  if (isCcf) ...[
+                    const Divider(height: 8),
+                    copyRow('Giro / Actividad Económica', activity),
+                  ],
+                  const Divider(height: 8),
+                  copyRow('Dirección Fiscal', address),
+                  const Divider(height: 8),
+                  copyRow('Correo para envío de DTE', email),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // 2. Desglose de Montos a Facturar
+            const Text(
+              '2. Montos a Facturar (Base Catálogo sin tarifa Abasto)',
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.bold,
+                color: AppColors.navyDark,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: isCcf
+                    ? const Color(0xFFFFFBEB)
+                    : const Color(0xFFEFF6FF),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isCcf
+                      ? const Color(0xFFFDE68A)
+                      : const Color(0xFFBFDBFE),
+                ),
+              ),
+              child: Column(
+                children: [
+                  if (isCcf) ...[
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Venta Neta Gravada (sin IVA):',
+                            style: TextStyle(fontSize: 12.5)),
+                        Text('\$${valorNetoGravado.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('IVA Débito Fiscal (13%):',
+                            style: TextStyle(fontSize: 12.5)),
+                        Text('\$${iva13.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                    const Divider(height: 14),
+                  ],
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Total Operación a Emitir:',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.navyDark,
+                        ),
+                      ),
+                      Text(
+                        '\$${baseInsumos.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.navyDark,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // 3. Instrucciones paso a paso
+            const Text(
+              '3. Pasos para completar el proceso',
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.bold,
+                color: AppColors.navyDark,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              isCcf
+                  ? '• Ingresa al portal de Facturación Electrónica de Hacienda (o tu sistema DTE) y selecciona DTE-03 (Comprobante de Crédito Fiscal).\n'
+                    '• Copia los datos del receptor de arriba (Razón Social, NRC, NIT y Giro).\n'
+                    '• Registra los insumos por un total de \$${baseInsumos.toStringAsFixed(2)} (el sistema desglosará \$${valorNetoGravado.toStringAsFixed(2)} neto + \$${iva13.toStringAsFixed(2)} IVA).\n'
+                    '• Descarga el PDF generado y súbelo con el botón de abajo para que el restaurante pueda deducir su crédito fiscal.'
+                  : '• Ingresa al portal de Facturación Electrónica de Hacienda (o tu sistema DTE) y selecciona DTE-01 (Factura Electrónica).\n'
+                    '• Emítela a nombre del restaurante con el monto bruto con IVA incluido de \$${baseInsumos.toStringAsFixed(2)}.\n'
+                    '• Descarga el PDF generado y adjúntalo con el botón de abajo para respaldar la entrega.',
+              style: const TextStyle(
+                  fontSize: 12.5, height: 1.45, color: Color(0xFF334155)),
+            ),
+            const SizedBox(height: 18),
+
+            SizedBox(
+              width: double.infinity,
+              height: 46,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.navyDark,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                icon: const Icon(Icons.upload_file, color: AppColors.tealMint),
+                label: const Text(
+                  'Subir PDF / Código del DTE Ahora',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _showAttachDteModal(order);
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showAttachDteModal(Map<String, dynamic> order) async {
+    final docType = (order['tax_document_type'] ?? 'factura') == 'ccf'
+        ? 'Crédito Fiscal (CCF / DTE-03)'
+        : 'Factura Electrónica (DTE-01)';
+    final genCodeCtrl = TextEditingController(
+      text: order['dte_generation_code']?.toString() ?? '',
+    );
+    final controlNumCtrl = TextEditingController(
+      text: order['dte_control_number']?.toString() ?? '',
+    );
+    String? currentPdfUrl = order['dte_pdf_url']?.toString();
+    bool isUploading = false;
+
+    String buildPdfViewId(String url) {
+      final viewId = 'dte-preview-${order['id']}-${url.hashCode}';
+      ui_web.platformViewRegistry.registerViewFactory(viewId, (int id) {
+        return html.IFrameElement()
+          ..src = '$url#toolbar=0&navpanes=0'
+          ..style.border = 'none'
+          ..style.width = '100%'
+          ..style.height = '100%';
+      });
+      return viewId;
+    }
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              const Icon(Icons.receipt_long, color: AppColors.primaryBlue),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Adjuntar $docType',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Pedido: ${order['code']} • Cliente: ${order['restaurant_name']}',
+                    style: const TextStyle(fontSize: 12, color: AppColors.subtitleGrey),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: genCodeCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Código de Generación DTE (UUID)',
+                      hintText: 'Ej. A1B2C3D4-E5F6-...',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: controlNumCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Número de Control (Opcional)',
+                      hintText: 'Ej. DTE-03-00000001-000000000000001',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(double.infinity, 44),
+                      side: const BorderSide(color: AppColors.primaryBlue),
+                    ),
+                    icon: const Icon(Icons.upload_file),
+                    label: Text(
+                      currentPdfUrl != null && currentPdfUrl!.isNotEmpty
+                          ? 'PDF Adjunto (Toca para reemplazar)'
+                          : 'Subir PDF del DTE (Hacienda)',
+                    ),
+                    onPressed: isUploading
+                        ? null
+                        : () {
+                            final uploadInput = html.FileUploadInputElement()
+                              ..accept = 'application/pdf';
+                            uploadInput.click();
+                            uploadInput.onChange.listen((e) async {
+                              final file = uploadInput.files?.first;
+                              if (file == null) return;
+                              setDialogState(() => isUploading = true);
+                              try {
+                                final reader = html.FileReader();
+                                reader.readAsArrayBuffer(file);
+                                await reader.onLoad.first;
+                                final bytes = reader.result as List<int>;
+                                final path =
+                                    'dte/${order['id']}_${DateTime.now().millisecondsSinceEpoch}.pdf';
+
+                                await supabase.storage
+                                    .from('dte-documents')
+                                    .uploadBinary(
+                                      path,
+                                      bytes as dynamic,
+                                      fileOptions: const FileOptions(
+                                        contentType: 'application/pdf',
+                                        upsert: true,
+                                      ),
+                                    );
+                                final url = supabase.storage
+                                    .from('dte-documents')
+                                    .getPublicUrl(path);
+                                setDialogState(() {
+                                  currentPdfUrl = url;
+                                  isUploading = false;
+                                });
+                              } catch (err) {
+                                setDialogState(() => isUploading = false);
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                        content: Text('Error subiendo PDF: $err'),
+                                        backgroundColor: Colors.red),
+                                  );
+                                }
+                              }
+                            });
+                          },
+                  ),
+                  if (currentPdfUrl != null && currentPdfUrl!.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: const [
+                                  Icon(Icons.picture_as_pdf,
+                                      size: 16, color: Colors.redAccent),
+                                  SizedBox(width: 6),
+                                  Text(
+                                    'Vista previa del PDF',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppColors.navyDark,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              TextButton.icon(
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 2),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                icon: const Icon(Icons.open_in_new, size: 14),
+                                label: const Text('Abrir completo',
+                                    style: TextStyle(fontSize: 11.5)),
+                                onPressed: () =>
+                                    html.window.open(currentPdfUrl!, '_blank'),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: SizedBox(
+                              height: 230,
+                              width: double.infinity,
+                              child: HtmlElementView(
+                                key: ValueKey(currentPdfUrl),
+                                viewType: buildPdfViewId(currentPdfUrl!),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isUploading ? null : () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.navyDark),
+              onPressed: isUploading
+                  ? null
+                  : () async {
+                      await supabase.from('orders').update({
+                        'dte_generation_code': genCodeCtrl.text.trim(),
+                        'dte_control_number': controlNumCtrl.text.trim(),
+                        if (currentPdfUrl != null) 'dte_pdf_url': currentPdfUrl,
+                      }).eq('id', order['id'].toString());
+
+                      if (mounted) {
+                        Navigator.pop(ctx);
+                        _refresh();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Comprobante fiscal guardado y enviado al restaurante'),
+                            backgroundColor: AppColors.tealMint,
+                          ),
+                        );
+                      }
+                    },
+              child: const Text('Guardar DTE', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildOrderCard(Map<String, dynamic> order) {
     final code = order['code'] ?? 'ORD-000';
     final restaurantName = order['restaurant_name'] ?? 'Restaurante';
@@ -1035,6 +1623,7 @@ class _SupplierIncomingOrdersScreenState
     final netEarnings = double.parse((baseInsumos - commission).toStringAsFixed(2));
 
     final status = (order['status'] ?? 'pendiente').toString();
+    final bool isCancelado = status.toLowerCase() == 'cancelado';
     final items = (order['order_items'] as List<dynamic>?) ?? [];
     final bool isLiquidado = _paidOrderIds.contains(order['id'].toString());
 
@@ -1111,6 +1700,60 @@ class _SupplierIncomingOrdersScreenState
                                   color: AppColors.primaryBlue,
                                 ),
                               ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                  const SizedBox(height: 4),
+                    InkWell(
+                      onTap: () => _showFiscalBillingGuideModal(order),
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: (order['tax_document_type'] ?? 'factura') == 'ccf'
+                              ? const Color(0xFFFEF3C7)
+                              : const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: (order['tax_document_type'] ?? 'factura') == 'ccf'
+                                ? const Color(0xFFF59E0B)
+                                : const Color(0xFFCBD5E1),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.receipt_long,
+                              size: 12,
+                              color: (order['tax_document_type'] ?? 'factura') == 'ccf'
+                                  ? const Color(0xFFB45309)
+                                  : AppColors.subtitleGrey,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              (order['tax_document_type'] ?? 'factura') == 'ccf'
+                                  ? 'Emitir Crédito Fiscal (CCF)'
+                                  : 'Emitir Factura (DTE-01)',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.bold,
+                                color: (order['tax_document_type'] ?? 'factura') == 'ccf'
+                                    ? const Color(0xFFB45309)
+                                    : AppColors.navyDark,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.info_outline,
+                              size: 12,
+                              color: (order['tax_document_type'] ?? 'factura') == 'ccf'
+                                  ? const Color(0xFFB45309)
+                                  : AppColors.primaryBlue,
                             ),
                           ],
                         ),
@@ -1346,13 +1989,12 @@ class _SupplierIncomingOrdersScreenState
                 ),
                 const SizedBox(width: 8),
                 PopupMenuButton<String>(
+                  enabled: !isCancelado,
+                  tooltip: isCancelado
+                      ? 'Pedido cancelado por el restaurante'
+                      : 'Cambiar estado',
                   onSelected: (newSt) => _updateOrderStatus(order, newSt),
                   itemBuilder: (context) => [
-                    //const PopupMenuItem(
-                      //value: 'pendiente',
-                      //child: Text('Marcar Pendiente'),
-                      
-                    //), 
                     const PopupMenuItem(
                       value: 'enRuta',
                       child: Text('Despachar En Ruta'),
@@ -1371,25 +2013,63 @@ class _SupplierIncomingOrdersScreenState
                     height: 38,
                     padding: const EdgeInsets.symmetric(horizontal: 14),
                     decoration: BoxDecoration(
-                      color: AppColors.primaryBlue,
+                      color: isCancelado
+                          ? Colors.grey.shade400
+                          : AppColors.primaryBlue,
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('Estado',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13)),
-                        SizedBox(width: 4),
-                        Icon(Icons.arrow_drop_down,
-                            color: Colors.white, size: 18),
+                        Icon(
+                          isCancelado
+                              ? Icons.lock_outline
+                              : Icons.arrow_drop_down,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          isCancelado ? 'Cancelado' : 'Estado',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
                       ],
                     ),
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              height: 36,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primaryBlue,
+                  side: BorderSide(color: AppColors.primaryBlue.withOpacity(0.5)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  padding: EdgeInsets.zero,
+                ),
+                icon: Icon(
+                  (order['dte_pdf_url'] != null ||
+                          (order['dte_generation_code'] ?? '').toString().isNotEmpty)
+                      ? Icons.check_circle
+                      : Icons.upload_file,
+                  size: 16,
+                ),
+                label: Text(
+                  (order['dte_pdf_url'] != null ||
+                          (order['dte_generation_code'] ?? '').toString().isNotEmpty)
+                      ? 'DTE Adjunto • Ver / Actualizar'
+                      : 'Adjuntar DTE (CCF / Factura)',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                onPressed: () => _showAttachDteModal(order),
+              ),
             ),
             if (status.toLowerCase() == 'entregado') ...[
               const SizedBox(height: 10),
@@ -1581,7 +2261,7 @@ class _SupplierIncomingOrdersScreenState
                                     crossAxisCount: 2,
                                     crossAxisSpacing: 18,
                                     mainAxisSpacing: 18,
-                                    mainAxisExtent: 430,
+                                    mainAxisExtent: 475,
                                   ),
                                   itemCount: filteredOrders.length,
                                   itemBuilder: (context, index) =>

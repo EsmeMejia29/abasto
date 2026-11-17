@@ -133,6 +133,7 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
       text: productToEdit?['unit']?.toString() ?? '1 unidad',
     );
 
+
     final Set<String> categoriesSet = {_supplierCategory, ..._defaultCategories};
     final List<String> availableCategories = categoriesSet.toList();
 
@@ -280,6 +281,34 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
                           ),
                         ),
                       ],
+                    ),
+                    Container(
+                      margin: const EdgeInsets.only(top: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Icon(Icons.info_outline,
+                              size: 15, color: AppColors.primaryBlue),
+                          SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Ingresa tu precio base con IVA (13%) incluido. Al restaurante se le mostrará +3% adicional por tarifa de servicio Abasto (tú facturarás en tu DTE únicamente tu precio base).',
+                              style: TextStyle(
+                                fontSize: 11,
+                                height: 1.35,
+                                color: AppColors.navyDark,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(

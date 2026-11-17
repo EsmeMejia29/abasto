@@ -26,7 +26,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final TextEditingController _phoneCtrl = TextEditingController();
   final TextEditingController _addressCtrl = TextEditingController();
   final TextEditingController _websiteCtrl = TextEditingController();
-  final TextEditingController _nrcNitCtrl = TextEditingController();
+  final TextEditingController _legalNameCtrl = TextEditingController();
+  final TextEditingController _nrcCtrl = TextEditingController();
+  final TextEditingController _nitCtrl = TextEditingController();
+  final TextEditingController _economicActivityCtrl = TextEditingController();
   final TextEditingController _hoursCtrl = TextEditingController();
 
   String? _avatarUrl;
@@ -61,7 +64,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _phoneCtrl.dispose();
     _addressCtrl.dispose();
     _websiteCtrl.dispose();
-    _nrcNitCtrl.dispose();
+    _legalNameCtrl.dispose(); 
+    _nrcCtrl.dispose(); 
+    _nitCtrl.dispose(); 
+    _economicActivityCtrl.dispose();
     _hoursCtrl.dispose();
     super.dispose();
   }
@@ -83,7 +89,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _phoneCtrl.text = res['phone'] ?? '';
           _addressCtrl.text = res['address'] ?? '';
           _websiteCtrl.text = res['website'] ?? '';
-          _nrcNitCtrl.text = res['nrc_nit'] ?? '';
+          _legalNameCtrl.text = res['legal_name'] ?? '';
+          _nrcCtrl.text = res['nrc'] ?? res['nrc_nit'] ?? '';
+          _nitCtrl.text = res['nit'] ?? '';
+          _economicActivityCtrl.text = res['economic_activity'] ?? '';
           _hoursCtrl.text =
               res['business_hours'] ?? 'Lunes a Sábado: 7:00 AM - 5:00 PM';
           _avatarUrl = res['avatar_url'];
@@ -190,12 +199,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     setState(() => _isSaving = true);
     try {
+      final nrcVal = _nrcCtrl.text.trim();
+      final nitVal = _nitCtrl.text.trim();
+      final combinedLegacy = [
+        if (nrcVal.isNotEmpty) 'NRC: $nrcVal',
+        if (nitVal.isNotEmpty) 'NIT: $nitVal',
+      ].join(' | ');
+
       await supabase.from('profiles').update({
         'business_name': _businessNameCtrl.text.trim(),
         'phone': _phoneCtrl.text.trim(),
         'address': _addressCtrl.text.trim(),
         'website': _websiteCtrl.text.trim(),
-        'nrc_nit': _nrcNitCtrl.text.trim(),
+        'legal_name': _legalNameCtrl.text.trim(),
+        'nrc': nrcVal,
+        'nit': nitVal,
+        'economic_activity': _economicActivityCtrl.text.trim(),
+        'nrc_nit': combinedLegacy,
         'business_hours': _hoursCtrl.text.trim(),
         'is_verified': true,
       }).eq('id', _currentUserId);
@@ -614,12 +634,62 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 14),
 
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Datos Fiscales (Ministerio de Hacienda - DTE)',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.navyDark,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+
               TextFormField(
-                controller: _nrcNitCtrl,
+                controller: _legalNameCtrl,
                 decoration: const InputDecoration(
-                  labelText: 'Número de Registro (NRC / NIT)',
-                  prefixIcon: Icon(Icons.badge_outlined),
-                  hintText: 'Ej. 123456-7',
+                  labelText: 'Razón Social / Denominación Legal',
+                  prefixIcon: Icon(Icons.account_balance_outlined),
+                  hintText: 'Ej. Inversiones Gastronómicas S.A.S. de C.V.',
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _nrcCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'NRC (Contribuyente IVA)',
+                        prefixIcon: Icon(Icons.receipt_long_outlined),
+                        hintText: 'Ej. 123456-7',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _nitCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'NIT / DUI Homologado',
+                        prefixIcon: Icon(Icons.badge_outlined),
+                        hintText: 'Ej. 0614-120595-102-3',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+
+              TextFormField(
+                controller: _economicActivityCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Giro / Actividad Económica',
+                  prefixIcon: Icon(Icons.work_outline),
+                  hintText: 'Ej. Restaurantes y servicio móvil de comidas',
                 ),
               ),
               const SizedBox(height: 14),

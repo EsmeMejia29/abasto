@@ -955,6 +955,77 @@ class _OrdersScreenState extends State<OrdersScreen> {
               ],
             ),
 
+            // Comprobante Tributario (CCF / Factura DTE)
+            const SizedBox(height: 8),
+            Builder(
+              builder: (context) {
+                final taxType = (order['tax_document_type'] ?? 'factura') == 'ccf'
+                    ? 'Crédito Fiscal (CCF)'
+                    : 'Factura Electrónica';
+                final dteUrl = order['dte_pdf_url']?.toString() ?? '';
+                final dteCode = order['dte_generation_code']?.toString() ?? '';
+                final hasDte = dteUrl.isNotEmpty || dteCode.isNotEmpty;
+
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: hasDte ? const Color(0xFFECFDF5) : const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: hasDte ? const Color(0xFFA7F3D0) : const Color(0xFFE2E8F0),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              hasDte ? '$taxType Emitido' : '$taxType Solicitado',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.bold,
+                                color: hasDte
+                                    ? const Color(0xFF047857)
+                                    : AppColors.navyDark,
+                              ),
+                            ),
+                            Text(
+                              dteCode.isNotEmpty
+                                  ? 'Cód: $dteCode'
+                                  : (hasDte
+                                      ? 'Documento PDF disponible'
+                                      : 'El distribuidor lo adjuntará al despachar'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontSize: 10.5, color: AppColors.subtitleGrey),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (dteUrl.isNotEmpty)
+                        TextButton.icon(
+                          onPressed: () => html.window.open(dteUrl, '_blank'),
+                          icon: const Icon(Icons.picture_as_pdf,
+                              size: 16, color: Color(0xFF047857)),
+                          label: const Text(
+                            'Descargar',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF047857),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                );
+              },
+            ),
+
             if (status.toLowerCase() == 'entregado') ...[
               const SizedBox(height: 10),
               SizedBox(
@@ -1070,7 +1141,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                         crossAxisCount: 2,
                         crossAxisSpacing: 18,
                         mainAxisSpacing: 18,
-                        mainAxisExtent: 380,
+                        mainAxisExtent: 430,
                       ),
                       itemCount: orders.length,
                       itemBuilder: (context, index) =>

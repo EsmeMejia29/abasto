@@ -1262,6 +1262,8 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
                           children: [
                             Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.navyDark), overflow: TextOverflow.ellipsis),
                             Text('${item['phone']} • ${item['email']}', style: const TextStyle(fontSize: 11, color: AppColors.subtitleGrey), overflow: TextOverflow.ellipsis),
+                            Text('Registro Fiscal: ${item['nrc_nit']}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.primaryBlue),
+),
                           ],
                         ),
                       ),
@@ -1527,6 +1529,8 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
                           children: [
                             Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.navyDark), overflow: TextOverflow.ellipsis),
                             Text('$branches sucursal(es) • $ordersCount órdenes pagadas', style: const TextStyle(fontSize: 11, color: AppColors.subtitleGrey)),
+                            Text('NRC / NIT: ${rest['nrc_nit']}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.primaryBlue),
+                            ),
                           ],
                         ),
                       ),

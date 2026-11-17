@@ -26,7 +26,10 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
   final _businessNameCtrl = TextEditingController(text: 'Mi Distribuidora');
   final _phoneCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
-  final _nrcNitCtrl = TextEditingController();
+  final _legalNameCtrl = TextEditingController();
+  final _nrcCtrl = TextEditingController();
+  final _nitCtrl = TextEditingController();
+  final _economicActivityCtrl = TextEditingController();
   final _websiteCtrl = TextEditingController();
   final _businessHoursCtrl =
       TextEditingController(text: 'Lunes a Sábado: 7:00 AM - 5:00 PM');
@@ -93,8 +96,19 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
             if ((profile['website'] ?? '').toString().isNotEmpty) {
               _websiteCtrl.text = profile['website'];
             }
-            if ((profile['nrc_nit'] ?? '').toString().isNotEmpty) {
-              _nrcNitCtrl.text = profile['nrc_nit'];
+            if ((profile['legal_name'] ?? '').toString().isNotEmpty) {
+              _legalNameCtrl.text = profile['legal_name'];
+            }
+            if ((profile['nrc'] ?? '').toString().isNotEmpty) {
+              _nrcCtrl.text = profile['nrc'];
+            } else if ((profile['nrc_nit'] ?? '').toString().isNotEmpty) {
+              _nrcCtrl.text = profile['nrc_nit'];
+            }
+            if ((profile['nit'] ?? '').toString().isNotEmpty) {
+              _nitCtrl.text = profile['nit'];
+            }
+            if ((profile['economic_activity'] ?? '').toString().isNotEmpty) {
+              _economicActivityCtrl.text = profile['economic_activity'];
             }
             if ((profile['business_hours'] ?? '').toString().isNotEmpty) {
               _businessHoursCtrl.text = profile['business_hours'];
@@ -116,7 +130,10 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
     _businessNameCtrl.dispose();
     _phoneCtrl.dispose();
     _addressCtrl.dispose();
-    _nrcNitCtrl.dispose();
+    _legalNameCtrl.dispose();
+    _nrcCtrl.dispose();
+    _nitCtrl.dispose();
+    _economicActivityCtrl.dispose();
     _websiteCtrl.dispose();
     _businessHoursCtrl.dispose();
     _categoryDetailsCtrl.dispose();
@@ -265,6 +282,14 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
           : _selectedCategories.join(', ');
 
       // 1. Guardar datos en profiles asegurando rol supplier
+      // 1. Guardar datos en profiles asegurando rol supplier
+      final nrcVal = _nrcCtrl.text.trim();
+      final nitVal = _nitCtrl.text.trim();
+      final combinedLegacy = [
+        if (nrcVal.isNotEmpty) 'NRC: $nrcVal',
+        if (nitVal.isNotEmpty) 'NIT: $nitVal',
+      ].join(' | ');
+
       await supabase.from('profiles').upsert({
         'id': userId,
         'business_name': _businessNameCtrl.text.trim().isNotEmpty
@@ -274,8 +299,12 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
         'address': _addressCtrl.text.trim().isNotEmpty
             ? _addressCtrl.text.trim()
             : 'Dirección central de distribución',
-        'nrc_nit': _nrcNitCtrl.text.trim().isNotEmpty
-            ? _nrcNitCtrl.text.trim()
+        'legal_name': _legalNameCtrl.text.trim(),
+        'nrc': nrcVal,
+        'nit': nitVal,
+        'economic_activity': _economicActivityCtrl.text.trim(),
+        'nrc_nit': combinedLegacy.isNotEmpty
+            ? combinedLegacy
             : 'En trámite de registro',
         'website': _websiteCtrl.text.trim(),
         'business_hours': _businessHoursCtrl.text.trim(),
@@ -468,18 +497,6 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
         const SizedBox(height: 14),
 
         TextField(
-          controller: _nrcNitCtrl,
-          decoration: const InputDecoration(
-            labelText: 'Número de Registro Comercial (NRC / NIT)',
-            hintText: 'Ej. 123456-7 o En trámite',
-            prefixIcon: Icon(Icons.badge_outlined),
-            border: OutlineInputBorder(),
-            isDense: true,
-          ),
-        ),
-        const SizedBox(height: 14),
-
-        TextField(
           controller: _addressCtrl,
           decoration: const InputDecoration(
             labelText: 'Dirección Física / Bodega Principal',
@@ -509,6 +526,110 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
             labelText: 'Página Web o Red Social',
             hintText: 'Ej. @midistribuidora o www.distribuidora.sv',
             prefixIcon: Icon(Icons.language_outlined),
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+
+        const Divider(height: 28),
+        Row(
+          children: const [
+            Icon(Icons.verified_user_outlined,
+                size: 18, color: AppColors.primaryBlue),
+            SizedBox(width: 6),
+            Text(
+              'Datos Fiscales y Transparencia Operativa',
+              style: TextStyle(
+                fontSize: 14.5,
+                fontWeight: FontWeight.bold,
+                color: AppColors.navyDark,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Container(
+          padding: const EdgeInsets.all(11),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFFBEB),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFFFDE68A)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: const [
+              Text(
+                '¿Por qué solicitamos estos datos?',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF92400E),
+                ),
+              ),
+              SizedBox(height: 3),
+              Text(
+                '• Verificación B2B: Acredita ante los restaurantes que eres un proveedor formal habilitado para emitir Crédito Fiscal (CCF / DTE-03) o Factura Electrónica (DTE-01).\n'
+                '• Liquidación y Comisiones Abasto: Tus ventas se liquidan semanalmente todos los viernes con una retención del 5% por uso de plataforma (0% si usas bono de referido). Además, Abasto añade un 3% adicional al restaurante sobre el precio que publiques en tu catálogo; tú facturarás en tu DTE únicamente tu precio base con IVA (13%) incluido.',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  height: 1.38,
+                  color: AppColors.navyDark,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        TextField(
+          controller: _legalNameCtrl,
+          decoration: const InputDecoration(
+            labelText: 'Razón Social / Denominación Legal',
+            hintText: 'Ej. Distribuidora Agrícola S.A. de C.V.',
+            prefixIcon: Icon(Icons.account_balance_outlined),
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _nrcCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'NRC (Contribuyente IVA)',
+                  hintText: 'Ej. 123456-7',
+                  prefixIcon: Icon(Icons.confirmation_number_outlined),
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextField(
+                controller: _nitCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'NIT / DUI Homologado',
+                  hintText: 'Ej. 0614-120595-102-3',
+                  prefixIcon: Icon(Icons.badge_outlined),
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        TextField(
+          controller: _economicActivityCtrl,
+          decoration: const InputDecoration(
+            labelText: 'Giro / Actividad Económica (Hacienda)',
+            hintText: 'Ej. Venta al por mayor de frutas, verduras y abarrotes',
+            prefixIcon: Icon(Icons.work_outline),
             border: OutlineInputBorder(),
             isDense: true,
           ),
@@ -700,7 +821,7 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
                 SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Las fotos son opcionales. Puedes subirlas directamente desde tu dispositivo o dejarlas para después.',
+                    'Ingresa tus precios base con IVA (13%) incluido (Abasto suma el 3% al comprador aparte). Las fotos son opcionales y puedes subirlas desde tu dispositivo o después.',
                     style: TextStyle(fontSize: 12, color: Color(0xFF166534)),
                   ),
                 ),

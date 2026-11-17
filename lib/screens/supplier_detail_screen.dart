@@ -30,6 +30,8 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
   String _selectedCategory = 'Todos';
   List<String> _supplierCategories = ['Todos'];
   int _freeCredits = 0;
+  String _selectedTaxDoc = 'ccf'; // 'ccf' (Crédito Fiscal) o 'factura' (Consumidor Final)
+  bool _hasCompleteTaxProfile = false;
 
   @override
   void initState() {
@@ -43,12 +45,19 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
       final uid = supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
       final res = await supabase
           .from('profiles')
-          .select('free_commission_orders')
+          .select('free_commission_orders, nrc, nit, nrc_nit')
           .eq('id', uid)
           .maybeSingle();
       if (mounted && res != null) {
+        final nrc = (res['nrc'] ?? '').toString().trim();
+        final nit = (res['nit'] ?? '').toString().trim();
+        final legacy = (res['nrc_nit'] ?? '').toString().trim();
+        final hasTax = (nrc.isNotEmpty && nit.isNotEmpty) || legacy.isNotEmpty;
+
         setState(() {
           _freeCredits = (res['free_commission_orders'] as num?)?.toInt() ?? 0;
+          _hasCompleteTaxProfile = hasTax;
+          _selectedTaxDoc = hasTax ? 'ccf' : 'factura';
         });
       }
     } catch (_) {}
@@ -182,6 +191,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
           'subtotal': subtotalInsumos,
           'platform_fee': feeAbasto,
           'is_commission_free': usedFreeOrder,
+          'tax_document_type': _selectedTaxDoc,
           'status': 'pendiente',
           'status_history': initialHistory,
           'is_financed': false,
@@ -419,6 +429,146 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
 
                 const Divider(height: 20),
 
+                const Text(
+                  'Documento Tributario (DTE El Salvador):',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.navyDark,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(10),
+                        onTap: () {
+                          setState(() => _selectedTaxDoc = 'ccf');
+                          setModalState(() {});
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: _selectedTaxDoc == 'ccf'
+                                ? AppColors.navyDark
+                                : const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: _selectedTaxDoc == 'ccf'
+                                  ? AppColors.navyDark
+                                  : const Color(0xFFCBD5E1),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Crédito Fiscal (CCF)',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: _selectedTaxDoc == 'ccf'
+                                      ? Colors.white
+                                      : AppColors.navyDark,
+                                ),
+                              ),
+                              Text(
+                                'DTE-03 • Deduce 13% IVA',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  color: _selectedTaxDoc == 'ccf'
+                                      ? AppColors.tealMint
+                                      : AppColors.subtitleGrey,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(10),
+                        onTap: () {
+                          setState(() => _selectedTaxDoc = 'factura');
+                          setModalState(() {});
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: _selectedTaxDoc == 'factura'
+                                ? AppColors.navyDark
+                                : const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: _selectedTaxDoc == 'factura'
+                                  ? AppColors.navyDark
+                                  : const Color(0xFFCBD5E1),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Factura Electrónica',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: _selectedTaxDoc == 'factura'
+                                      ? Colors.white
+                                      : AppColors.navyDark,
+                                ),
+                              ),
+                              Text(
+                                'DTE-01 • Consumidor Final',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  color: _selectedTaxDoc == 'factura'
+                                      ? AppColors.tealMint
+                                      : AppColors.subtitleGrey,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_selectedTaxDoc == 'ccf' && !_hasCompleteTaxProfile) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF3C7),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: const [
+                        Icon(Icons.warning_amber_rounded,
+                            size: 16, color: Color(0xFFB45309)),
+                        SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Completa tu NRC, NIT y Giro en "Mi Perfil" para que el distribuidor emita tu CCF.',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFFB45309),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                
                 if (_freeCredits > 0)
                   Container(
                     margin: const EdgeInsets.only(bottom: 10),

@@ -26,7 +26,10 @@ class _RestaurantOnboardingScreenState
   final _businessNameCtrl = TextEditingController(text: 'Mi Restaurante');
   final _phoneCtrl = TextEditingController();
   final _websiteCtrl = TextEditingController();
-  final _nrcNitCtrl = TextEditingController();
+  final _legalNameCtrl = TextEditingController();
+  final _nrcCtrl = TextEditingController();
+  final _nitCtrl = TextEditingController();
+  final _economicActivityCtrl = TextEditingController();
   final _businessHoursCtrl =
       TextEditingController(text: 'Lunes a Sábado: 7:00 AM - 5:00 PM');
 
@@ -116,6 +119,7 @@ class _RestaurantOnboardingScreenState
     });
   }
 
+  
   Future<void> _loadExistingProfileData() async {
     final currentAuthId = supabase.auth.currentUser?.id;
     final userId = (widget.restaurantId.isNotEmpty)
@@ -146,8 +150,19 @@ class _RestaurantOnboardingScreenState
             if ((profile['website'] ?? '').toString().isNotEmpty) {
               _websiteCtrl.text = profile['website'];
             }
-            if ((profile['nrc_nit'] ?? '').toString().isNotEmpty) {
-              _nrcNitCtrl.text = profile['nrc_nit'];
+            if ((profile['legal_name'] ?? '').toString().isNotEmpty) {
+              _legalNameCtrl.text = profile['legal_name'];
+            }
+            if ((profile['nrc'] ?? '').toString().isNotEmpty) {
+              _nrcCtrl.text = profile['nrc'];
+            } else if ((profile['nrc_nit'] ?? '').toString().isNotEmpty) {
+              _nrcCtrl.text = profile['nrc_nit'];
+            }
+            if ((profile['nit'] ?? '').toString().isNotEmpty) {
+              _nitCtrl.text = profile['nit'];
+            }
+            if ((profile['economic_activity'] ?? '').toString().isNotEmpty) {
+              _economicActivityCtrl.text = profile['economic_activity'];
             }
             if ((profile['business_hours'] ?? '').toString().isNotEmpty) {
               _businessHoursCtrl.text = profile['business_hours'];
@@ -192,7 +207,10 @@ class _RestaurantOnboardingScreenState
     _businessNameCtrl.dispose();
     _phoneCtrl.dispose();
     _websiteCtrl.dispose();
-    _nrcNitCtrl.dispose();
+    _legalNameCtrl.dispose(); 
+    _nrcCtrl.dispose(); 
+    _nitCtrl.dispose();
+    _economicActivityCtrl.dispose();
     _businessHoursCtrl.dispose();
     _restaurantTypeCtrl.dispose();
     _customZoneCtrl.dispose();
@@ -232,7 +250,14 @@ class _RestaurantOnboardingScreenState
         : _deliveryAddressCtrl.text.trim();
 
     try {
-      // 1. Guardar todos los datos comerciales en la tabla profiles
+      // 1. Guardar todos los datos comerciales y fiscales en la tabla profiles
+      final nrcVal = _nrcCtrl.text.trim();
+      final nitVal = _nitCtrl.text.trim();
+      final combinedLegacy = [
+        if (nrcVal.isNotEmpty) 'NRC: $nrcVal',
+        if (nitVal.isNotEmpty) 'NIT: $nitVal',
+      ].join(' | ');
+
       await supabase.from('profiles').upsert({
         'id': userId,
         'business_name': _businessNameCtrl.text.trim().isNotEmpty
@@ -241,12 +266,16 @@ class _RestaurantOnboardingScreenState
         'phone': _phoneCtrl.text.trim(),
         'address': _restaurantAddressCtrl.text.trim(),
         'website': _websiteCtrl.text.trim(),
-        'nrc_nit': _nrcNitCtrl.text.trim(),
+        'legal_name': _legalNameCtrl.text.trim(),
+        'nrc': nrcVal,
+        'nit': nitVal,
+        'economic_activity': _economicActivityCtrl.text.trim(),
+        'nrc_nit': combinedLegacy,
         'business_hours': _businessHoursCtrl.text.trim(),
         'location': effectiveZone.isNotEmpty ? effectiveZone : 'Santa Tecla',
         'role': 'restaurant',
       });
-
+      
       // 2. Guardar detalles operativos en restaurant_details
       await supabase.from('restaurant_details').upsert({
         'profile_id': userId,
@@ -391,25 +420,13 @@ class _RestaurantOnboardingScreenState
         const SizedBox(height: 14),
 
         // Página Web o Red Social
+        // Página Web o Red Social
         TextField(
           controller: _websiteCtrl,
           decoration: const InputDecoration(
             labelText: 'Página Web o Red Social (Instagram / Facebook)',
             hintText: 'Ej. @mirestaurante o https://...',
             prefixIcon: Icon(Icons.language),
-            border: OutlineInputBorder(),
-            isDense: true,
-          ),
-        ),
-        const SizedBox(height: 14),
-
-        // Número de Registro (NRC / NIT)
-        TextField(
-          controller: _nrcNitCtrl,
-          decoration: const InputDecoration(
-            labelText: 'Número de Registro (NRC / NIT / DTE)',
-            hintText: 'Opcional (para fines fiscales)',
-            prefixIcon: Icon(Icons.badge_outlined),
             border: OutlineInputBorder(),
             isDense: true,
           ),
@@ -423,6 +440,95 @@ class _RestaurantOnboardingScreenState
             labelText: 'Horario de Atención',
             hintText: 'Ej. Lunes a Sábado: 7:00 AM - 5:00 PM',
             prefixIcon: Icon(Icons.access_time),
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+
+        const Divider(height: 28),
+        Row(
+          children: const [
+            Icon(Icons.receipt_long_outlined,
+                size: 18, color: AppColors.primaryBlue),
+            SizedBox(width: 6),
+            Text(
+              'Datos Fiscales para Comprobantes (Opcional)',
+              style: TextStyle(
+                fontSize: 14.5,
+                fontWeight: FontWeight.bold,
+                color: AppColors.navyDark,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEFF6FF),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFFBFDBFE)),
+          ),
+          child: const Text(
+            '¿Por qué es importante? Si eres contribuyente de IVA y necesitas deducir el 13% con Crédito Fiscal (CCF / DTE-03) en tus compras, los distribuidores usarán estos datos para emitir tus documentos tributarios sin atrasos. Si aún no estás inscrito, puedes dejarlos en blanco.',
+            style: TextStyle(
+              fontSize: 11.5,
+              height: 1.35,
+              color: AppColors.navyDark,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        TextField(
+          controller: _legalNameCtrl,
+          decoration: const InputDecoration(
+            labelText: 'Razón Social / Denominación Legal',
+            hintText: 'Ej. Inversiones Gastronómicas S.A.S. de C.V.',
+            prefixIcon: Icon(Icons.account_balance_outlined),
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _nrcCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'NRC (Contribuyente IVA)',
+                  hintText: 'Ej. 123456-7',
+                  prefixIcon: Icon(Icons.confirmation_number_outlined),
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextField(
+                controller: _nitCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'NIT / DUI Homologado',
+                  hintText: 'Ej. 0614-120595-102-3',
+                  prefixIcon: Icon(Icons.badge_outlined),
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        TextField(
+          controller: _economicActivityCtrl,
+          decoration: const InputDecoration(
+            labelText: 'Giro / Actividad Económica (Hacienda)',
+            hintText: 'Ej. Restaurantes y servicio móvil de comidas',
+            prefixIcon: Icon(Icons.work_outline),
             border: OutlineInputBorder(),
             isDense: true,
           ),
