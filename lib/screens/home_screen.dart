@@ -6,6 +6,7 @@ import '../config/session_manager.dart';
 import '../services/notification_service.dart';
 import 'supplier_detail_screen.dart';
 import '../widgets/business_info_sheet.dart';
+import '../widgets/interactive_tutorial_modal.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -171,6 +172,20 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         actions: [
+          TextButton.icon(
+            onPressed: () =>
+                InteractiveTutorialModal.show(context, isSupplier: false),
+            icon: const Icon(Icons.help_outline_rounded,
+                size: 18, color: AppColors.primaryBlue),
+            label: const Text(
+              'Tutorial',
+              style: TextStyle(
+                color: AppColors.primaryBlue,
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+              ),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () {

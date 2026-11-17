@@ -15,6 +15,7 @@ import 'supplier_bank_settings_screen.dart';
 
 import '../../services/notification_service.dart';
 import '../../utils/csv_exporter.dart';
+import '../../widgets/interactive_tutorial_modal.dart';
 
 class SupplierIncomingOrdersScreen extends StatefulWidget {
   const SupplierIncomingOrdersScreen({super.key});
@@ -36,6 +37,7 @@ class _SupplierIncomingOrdersScreenState
 
   static const double _supplierCommissionRate = 0.05; // 5% comisión Abasto
   Set<String> _paidOrderIds = {}; // Órdenes ya liquidadas por el admin
+  Map<String, Map<String, dynamic>> _payoutDetailsByOrder = {};
 
   String get _currentUserId =>
       supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
@@ -99,15 +101,19 @@ class _SupplierIncomingOrdersScreenState
     try {
       final paidRes = await supabase
           .from('supplier_payouts')
-          .select('order_id')
+          .select('order_id, transfer_reference, receipt_url')
           .eq('supplier_id', _currentUserId)
           .eq('status', 'liquidado');
 
-      _paidOrderIds = (paidRes as List<dynamic>)
-          .map((p) => p['order_id']?.toString())
-          .where((id) => id != null)
-          .cast<String>()
-          .toSet();
+      _paidOrderIds = {};
+      _payoutDetailsByOrder = {};
+      for (final p in (paidRes as List<dynamic>)) {
+        final oid = p['order_id']?.toString();
+        if (oid != null) {
+          _paidOrderIds.add(oid);
+          _payoutDetailsByOrder[oid] = Map<String, dynamic>.from(p as Map);
+        }
+      }
     } catch (e) {
       debugPrint("Error obteniendo pagos liquidados: $e");
     }
@@ -2114,18 +2120,43 @@ class _SupplierIncomingOrdersScreenState
                           : const Color(0xFFB45309),
                     ),
                     const SizedBox(width: 5),
-                    Text(
-                      isLiquidado
-                          ? 'Transferido a tu banco'
-                          : 'Pendiente de liquidación (Viernes)',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: isLiquidado
-                            ? const Color(0xFF16A34A)
-                            : const Color(0xFFB45309),
+                    Expanded(
+                      child: Text(
+                        isLiquidado
+                            ? 'Transferido${(_payoutDetailsByOrder[order['id'].toString()]?['transfer_reference'] ?? '').toString().isNotEmpty ? ' • Ref: ${_payoutDetailsByOrder[order['id'].toString()]!['transfer_reference']}' : ' a tu banco'}'
+                            : 'Pendiente de liquidación (Viernes)',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: isLiquidado
+                              ? const Color(0xFF16A34A)
+                              : const Color(0xFFB45309),
+                        ),
                       ),
                     ),
+                    if (isLiquidado &&
+                        (_payoutDetailsByOrder[order['id'].toString()]
+                                    ?['receipt_url'] ??
+                                '')
+                            .toString()
+                            .isNotEmpty)
+                      InkWell(
+                        onTap: () => html.window.open(
+                            _payoutDetailsByOrder[order['id'].toString()]![
+                                'receipt_url'],
+                            '_blank'),
+                        child: const Text(
+                          'Ver Comprobante',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.primaryBlue,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -2315,6 +2346,20 @@ class _SupplierIncomingOrdersScreenState
       appBar: AppBar(
         title: const Text('Despacho de Pedidos'),
         actions: [
+          TextButton.icon(
+            onPressed: () =>
+                InteractiveTutorialModal.show(context, isSupplier: true),
+            icon: const Icon(Icons.help_outline_rounded,
+                size: 18, color: AppColors.primaryBlue),
+            label: const Text(
+              'Tutorial',
+              style: TextStyle(
+                color: AppColors.primaryBlue,
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+              ),
+            ),
+          ),
           IconButton(
             tooltip: 'Exportar Ventas Contabilidad (CSV)',
             icon: const Icon(Icons.download_rounded),

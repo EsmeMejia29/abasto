@@ -1,3 +1,4 @@
+import 'dart:html' as html;
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../main.dart';
@@ -16,8 +17,14 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
   late Future<Map<String, dynamic>> _dataFuture;
   final TextEditingController _searchCtrl = TextEditingController();
   final TextEditingController _restaurantSearchCtrl = TextEditingController();
+  final TextEditingController _commerceSearchCtrl = TextEditingController();
+  final TextEditingController _globalOrderSearchCtrl = TextEditingController();
   String _searchQuery = '';
   String _restaurantSearchQuery = '';
+  String _commerceSearchQuery = '';
+  String _globalOrderSearchQuery = '';
+  String _commerceRoleFilter = 'todos'; // 'todos', 'supplier', 'restaurant', 'pendiente_verif'
+  String _globalOrderFilter = 'todos'; // 'todos', 'sin_dte', 'pendiente', 'entregado'
 
   // Control de pestañas: 0 = Distribuidores & Banco, 1 = Restaurantes & Cobros
   int _currentNavIndex = 0;
@@ -43,12 +50,20 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
     _restaurantSearchCtrl.addListener(() {
       setState(() => _restaurantSearchQuery = _restaurantSearchCtrl.text.trim().toLowerCase());
     });
+    _commerceSearchCtrl.addListener(() {
+      setState(() => _commerceSearchQuery = _commerceSearchCtrl.text.trim().toLowerCase());
+    });
+    _globalOrderSearchCtrl.addListener(() {
+      setState(() => _globalOrderSearchQuery = _globalOrderSearchCtrl.text.trim().toLowerCase());
+    });
   }
 
   @override
   void dispose() {
     _searchCtrl.dispose();
     _restaurantSearchCtrl.dispose();
+    _commerceSearchCtrl.dispose();
+    _globalOrderSearchCtrl.dispose();
     super.dispose();
   }
 
@@ -96,7 +111,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
       }
     } catch (_) {}
 
-    // 3. Órdenes: Traemos todas las órdenes pagadas ('confirmado' y 'entregado')
+    // 3. Órdenes globales de toda la plataforma
     final ordersRes = await supabase
         .from('orders')
         .select('''
@@ -108,15 +123,20 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
           subtotal,
           platform_fee,
           status, 
+          tax_document_type,
+          dte_generation_code,
+          dte_pdf_url,
           has_incident,
           incident_note,
           created_at,
           order_items (*)
         ''')
-        .filter('status', 'in', ['confirmado', 'entregado'])
         .order('created_at', ascending: false);
 
-    final allRelevantOrders = List<Map<String, dynamic>>.from(ordersRes);
+    final allPlatformOrders = List<Map<String, dynamic>>.from(ordersRes);
+    final allRelevantOrders = allPlatformOrders
+        .where((o) => ['confirmado', 'entregado'].contains(o['status']))
+        .toList();
 
     // Órdenes retenidas por incidencia abierta
     final disputedOrders = allRelevantOrders
@@ -360,9 +380,31 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
     final double shouldBeInBankNow = totalCollectedFromRestaurants - totalHistoricalAlreadyPaid;
     final double totalPlatformProfit = totalRestaurantFees + totalSupplierFeesPending;
 
+    final Map<String, String> supplierPhonesMap = {
+      for (var s in suppliers)
+        s['id'].toString(): (s['phone'] ?? '').toString()
+    };
+
+    final globalOrders = allPlatformOrders.map((o) {
+      final sId = o['supplier_id']?.toString() ?? '';
+      final rId = o['restaurant_id']?.toString() ?? '';
+      return {
+        ...o,
+        'supplier_name': supplierNamesMap[sId] ?? 'Distribuidor',
+        'supplier_phone': supplierPhonesMap[sId] ?? '',
+        'restaurant_name': restaurantNamesMap[rId] ?? 'Restaurante',
+      };
+    }).toList();
+
+    final allCommerces = allProfiles
+        .where((p) => p['role'] == 'supplier' || p['role'] == 'restaurant')
+        .toList();
+
     return {
       'suppliers': summaryList,
       'restaurants': restaurantSummaryList,
+      'allCommerces': allCommerces,
+      'globalOrders': globalOrders,
       'bankTotalInflows': totalCollectedFromRestaurants,
       'shouldBeInBankNow': shouldBeInBankNow,
       'totalPendingToPayOut': totalPendingToPayOut,
@@ -599,56 +641,166 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
   }
 
   Future<void> _markAsTransferred(Map<String, dynamic> item) async {
-    final pendingOrders = item['pending_orders'] as List<Map<String, dynamic>>;
+    final pendingOrders = item['pending_orders'] as List<dynamic>? ?? [];
     final name = item['business_name'];
     final double amount = item['pending_net'];
     final supplierId = item['supplier_id'].toString();
 
+    final refCtrl = TextEditingController();
+    String? receiptUrl;
+    bool isUploadingReceipt = false;
+
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Confirmar Liquidación Semanal'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('¿Confirmas que ya transferiste \$${amount.toStringAsFixed(2)} a $name?', style: const TextStyle(fontSize: 14)),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(10)),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Banco: ${item['bank_name']} (${item['account_type']})', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  const SizedBox(height: 2),
-                  Text('Cuenta: ${item['account_number']}', style: const TextStyle(fontSize: 13)),
-                  Text('Titular: ${item['holder_name']} • Doc: ${item['holder_doc']}', style: const TextStyle(fontSize: 12, color: AppColors.subtitleGrey)),
-                ],
-              ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Confirmar Liquidación Transfer365'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '¿Confirmas que ya transferiste \$${amount.toStringAsFixed(2)} a $name?',
+                  style: const TextStyle(fontSize: 14),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Banco: ${item['bank_name']} (${item['account_type']})',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                      const SizedBox(height: 2),
+                      Text('Cuenta: ${item['account_number']}',
+                          style: const TextStyle(fontSize: 13)),
+                      Text(
+                        'Titular: ${item['holder_name']} • Doc: ${item['holder_doc']}',
+                        style: const TextStyle(
+                            fontSize: 12, color: AppColors.subtitleGrey),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: refCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'N° Referencia Transfer365 / Banco',
+                    hintText: 'Ej. TR365-20261117-8842',
+                    prefixIcon: Icon(Icons.tag),
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 40),
+                  ),
+                  icon: Icon(
+                    receiptUrl != null
+                        ? Icons.check_circle
+                        : Icons.upload_file_outlined,
+                    size: 18,
+                    color: receiptUrl != null
+                        ? const Color(0xFF16A34A)
+                        : AppColors.primaryBlue,
+                  ),
+                  label: Text(
+                    isUploadingReceipt
+                        ? 'Subiendo comprobante...'
+                        : (receiptUrl != null
+                            ? 'Comprobante Adjunto (Cambiar)'
+                            : 'Adjuntar Captura / PDF Transferencia (Opcional)'),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  onPressed: isUploadingReceipt
+                      ? null
+                      : () {
+                          final input = html.FileUploadInputElement()
+                            ..accept = 'image/*,application/pdf';
+                          input.click();
+                          input.onChange.listen((_) async {
+                            final file = input.files?.first;
+                            if (file == null) return;
+                            setDialogState(() => isUploadingReceipt = true);
+                            try {
+                              final reader = html.FileReader();
+                              reader.readAsArrayBuffer(file);
+                              await reader.onLoad.first;
+                              final bytes = reader.result as List<int>;
+                              final ext = file.name.split('.').last;
+                              final path =
+                                  '$supplierId/${DateTime.now().millisecondsSinceEpoch}.$ext';
+
+                              await supabase.storage
+                                  .from('payout-receipts')
+                                  .uploadBinary(path, bytes as dynamic);
+                              final url = supabase.storage
+                                  .from('payout-receipts')
+                                  .getPublicUrl(path);
+                              setDialogState(() {
+                                receiptUrl = url;
+                                isUploadingReceipt = false;
+                              });
+                            } catch (e) {
+                              setDialogState(() => isUploadingReceipt = false);
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                      content:
+                                          Text('Error subiendo comprobante: $e'),
+                                      backgroundColor: Colors.red),
+                                );
+                              }
+                            }
+                          });
+                        },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isUploadingReceipt ? null : () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF16A34A)),
+              onPressed: isUploadingReceipt ? null : () => Navigator.pop(ctx, true),
+              child: const Text('Sí, Liquidar Semana',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF16A34A)),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Sí, Liquidar Semana', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
       ),
     );
 
     if (confirm == true) {
       try {
         final nowIso = DateTime.now().toUtc().toIso8601String();
+        final refText = refCtrl.text.trim();
         final inserts = pendingOrders.map((ord) {
           final totalOrd = (ord['total_amount'] as num?)?.toDouble() ?? 0.0;
           final baseOrd = (ord['subtotal'] as num?)?.toDouble() ??
-              double.parse((totalOrd / (1 + _restaurantFeeRate)).toStringAsFixed(2));
-          final fee = double.parse((baseOrd * _supplierFeeRate).toStringAsFixed(2));
+              double.parse(
+                  (totalOrd / (1 + _restaurantFeeRate)).toStringAsFixed(2));
+          final fee =
+              double.parse((baseOrd * _supplierFeeRate).toStringAsFixed(2));
           final net = double.parse((baseOrd - fee).toStringAsFixed(2));
 
           return {
@@ -660,6 +812,8 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
             'net_payout': net,
             'status': 'liquidado',
             'paid_at': nowIso,
+            if (refText.isNotEmpty) 'transfer_reference': refText,
+            if (receiptUrl != null) 'receipt_url': receiptUrl,
           };
         }).toList();
 
@@ -671,13 +825,79 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Pago de \$${amount.toStringAsFixed(2)} a $name liquidado.'), backgroundColor: AppColors.tealMint),
+            SnackBar(
+              content:
+                  Text('Pago de \$${amount.toStringAsFixed(2)} a $name liquidado.'),
+              backgroundColor: AppColors.tealMint,
+            ),
           );
         }
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error al procesar: $e'), backgroundColor: Colors.red),
+            SnackBar(
+                content: Text('Error al procesar: $e'),
+                backgroundColor: Colors.red),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _adminResolveDispute(
+      Map<String, dynamic> order, {required bool cancelOrder}) async {
+    final actionText = cancelOrder
+        ? 'Anular Pedido y Reembolsar al Restaurante'
+        : 'Liberar Pedido para Liquidación al Distribuidor';
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(actionText,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        content: Text(
+          cancelOrder
+              ? 'La orden ${order['code']} pasará a estado Cancelado y NO se transferirá al distribuidor.'
+              : 'La incidencia de ${order['code']} se marcará como resuelta por Administración y el saldo pasará a liquidación.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Volver')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor:
+                    cancelOrder ? Colors.red : const Color(0xFF16A34A)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Confirmar Resolución',
+                style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await supabase.from('orders').update({
+          'has_incident': false,
+          'incident_status': cancelOrder ? 'anulado_admin' : 'resuelta_admin',
+          if (cancelOrder) 'status': 'cancelado',
+        }).eq('id', order['id'].toString());
+
+        _refresh();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Resolución aplicada a ${order['code']}.'),
+              backgroundColor: AppColors.tealMint,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text('Error al resolver disputa: $e'),
+                backgroundColor: Colors.red),
           );
         }
       }
@@ -1242,12 +1462,62 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
                   ],
                 ),
                 const SizedBox(height: 6),
-                ...disputedOrders.map((d) => Padding(
-                      padding: const EdgeInsets.only(top: 3),
-                      child: Text(
-                        '• ${d['code']} (${d['restaurant_name']} → ${d['supplier_name']}): ${d['incident_note'] ?? ''}',
-                        style: const TextStyle(
-                            fontSize: 12, color: Color(0xFF7F1D1D)),
+                ...disputedOrders.map((d) => Container(
+                      margin: const EdgeInsets.only(top: 8),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFFECACA)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '• ${d['code']} (${d['restaurant_name']} → ${d['supplier_name']}): ${d['incident_note'] ?? ''}',
+                            style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF7F1D1D)),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 8,
+                            children: [
+                              OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: const Color(0xFF16A34A),
+                                  side: const BorderSide(
+                                      color: Color(0xFF16A34A)),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 4),
+                                  minimumSize: Size.zero,
+                                ),
+                                icon: const Icon(Icons.check_circle_outline,
+                                    size: 14),
+                                label: const Text('Liberar Pago',
+                                    style: TextStyle(fontSize: 11.5)),
+                                onPressed: () => _adminResolveDispute(d,
+                                    cancelOrder: false),
+                              ),
+                              OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.red,
+                                  side: const BorderSide(color: Colors.red),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 4),
+                                  minimumSize: Size.zero,
+                                ),
+                                icon:
+                                    const Icon(Icons.cancel_outlined, size: 14),
+                                label: const Text('Anular y Reembolsar',
+                                    style: TextStyle(fontSize: 11.5)),
+                                onPressed: () =>
+                                    _adminResolveDispute(d, cancelOrder: true),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
                     )),
               ],
@@ -1751,6 +2021,518 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
     );
   }
 
+  Future<void> _toggleCommerceVerification(
+      String profileId, String name, bool currentVerified) async {
+    try {
+      await supabase
+          .from('profiles')
+          .update({'is_verified': !currentVerified}).eq('id', profileId);
+
+      // Sincronizar también en tablas de detalle si existen
+      try {
+        await supabase
+            .from('supplier_details')
+            .update({'is_verified': !currentVerified}).eq('profile_id', profileId);
+      } catch (_) {}
+      try {
+        await supabase
+            .from('restaurant_details')
+            .update({'is_verified': !currentVerified}).eq('profile_id', profileId);
+      } catch (_) {}
+
+      _refresh();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(!currentVerified
+                ? '$name ahora está Verificado en Abasto'
+                : 'Se revocó la verificación de $name'),
+            backgroundColor:
+                !currentVerified ? AppColors.tealMint : Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Error al actualizar verificación: $e'),
+              backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _adjustPromoCredits(
+      Map<String, dynamic> profile, int delta) async {
+    final bool isSupplier = profile['role'] == 'supplier';
+    final String column = isSupplier
+        ? 'supplier_free_commission_orders'
+        : 'free_commission_orders';
+    final int currentVal = (profile[column] as num?)?.toInt() ?? 0;
+    final int nextVal = (currentVal + delta).clamp(0, 99);
+
+    try {
+      await supabase
+          .from('profiles')
+          .update({column: nextVal}).eq('id', profile['id'].toString());
+      _refresh();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                'Créditos 0% comisión de ${profile['business_name']}: $nextVal'),
+            duration: const Duration(seconds: 1),
+            backgroundColor: AppColors.primaryBlue,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Error actualizando bonos: $e'),
+              backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  // --- SECCIÓN 3: VERIFICACIÓN DE COMERCIOS Y BONOS PROMOCIONALES ---
+  Widget _buildCommercesTab(Map<String, dynamic> data) {
+    final allCommerces = (data['allCommerces'] as List<Map<String, dynamic>>? ?? []);
+
+    final filtered = allCommerces.where((c) {
+      final role = (c['role'] ?? '').toString();
+      final isVerified = c['is_verified'] == true;
+      final name = (c['business_name'] ?? '').toString().toLowerCase();
+      final legal = (c['legal_name'] ?? '').toString().toLowerCase();
+      final nrc = (c['nrc'] ?? c['nrc_nit'] ?? '').toString().toLowerCase();
+
+      final matchesSearch = _commerceSearchQuery.isEmpty ||
+          name.contains(_commerceSearchQuery) ||
+          legal.contains(_commerceSearchQuery) ||
+          nrc.contains(_commerceSearchQuery);
+
+      bool matchesFilter = true;
+      if (_commerceRoleFilter == 'supplier') {
+        matchesFilter = role == 'supplier';
+      } else if (_commerceRoleFilter == 'restaurant') {
+        matchesFilter = role == 'restaurant';
+      } else if (_commerceRoleFilter == 'pendiente_verif') {
+        matchesFilter = !isVerified;
+      }
+
+      return matchesSearch && matchesFilter;
+    }).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          margin: const EdgeInsets.only(bottom: 14),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Auditoría B2B, Verificación y Créditos Promocionales',
+                style: TextStyle(
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.navyDark),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _commerceSearchCtrl,
+                decoration: InputDecoration(
+                  hintText: 'Buscar por comercio, razón social o NRC/NIT...',
+                  prefixIcon: const Icon(Icons.search, size: 18),
+                  filled: true,
+                  fillColor: const Color(0xFFF8FAFC),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SegmentedButton<String>(
+                  showSelectedIcon: false,
+                  segments: [
+                    ButtonSegment(
+                        value: 'todos',
+                        label: Text('Todos (${allCommerces.length})')),
+                    const ButtonSegment(
+                        value: 'pendiente_verif', label: Text('Sin Verificar')),
+                    const ButtonSegment(
+                        value: 'supplier', label: Text('Distribuidores')),
+                    const ButtonSegment(
+                        value: 'restaurant', label: Text('Restaurantes')),
+                  ],
+                  selected: {_commerceRoleFilter},
+                  onSelectionChanged: (v) =>
+                      setState(() => _commerceRoleFilter = v.first),
+                ),
+              ),
+            ],
+          ),
+        ),
+        ...filtered.map((c) {
+          final isSupplier = c['role'] == 'supplier';
+          final isVerified = c['is_verified'] == true;
+          final name = c['business_name'] ?? 'Comercio';
+          final legalName = (c['legal_name'] ?? '').toString();
+          final nrc = (c['nrc'] ?? '').toString();
+          final nit = (c['nit'] ?? '').toString();
+          final legacy = (c['nrc_nit'] ?? '').toString();
+          final credits = (c[isSupplier
+                      ? 'supplier_free_commission_orders'
+                      : 'free_commission_orders'] as num?)
+                  ?.toInt() ??
+              0;
+
+          return Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: BorderSide(
+                  color: isVerified
+                      ? const Color(0xFFA7F3D0)
+                      : const Color(0xFFE2E8F0)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 18,
+                        backgroundColor: isSupplier
+                            ? const Color(0xFFDCFCE7)
+                            : const Color(0xFFE0F2FE),
+                        child: Icon(
+                          isSupplier ? Icons.storefront : Icons.restaurant,
+                          size: 18,
+                          color: isSupplier
+                              ? const Color(0xFF16A34A)
+                              : const Color(0xFF0369A1),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    name,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 15,
+                                        color: AppColors.navyDark),
+                                  ),
+                                ),
+                                if (isVerified) ...[
+                                  const SizedBox(width: 5),
+                                  const Icon(Icons.verified,
+                                      size: 17, color: AppColors.tealMint),
+                                ],
+                              ],
+                            ),
+                            Text(
+                              '${isSupplier ? 'Distribuidor' : 'Restaurante'} • ${c['phone'] ?? ''} • ${c['email'] ?? ''}',
+                              style: const TextStyle(
+                                  fontSize: 11.5,
+                                  color: AppColors.subtitleGrey),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Switch(
+                        value: isVerified,
+                        activeColor: AppColors.tealMint,
+                        onChanged: (_) => _toggleCommerceVerification(
+                            c['id'].toString(), name, isVerified),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 16),
+                  Text(
+                    'Razón Social: ${legalName.isNotEmpty ? legalName : 'No registrada'}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  Text(
+                    (nrc.isNotEmpty || nit.isNotEmpty)
+                        ? 'NRC: ${nrc.isNotEmpty ? nrc : 'N/A'}  •  NIT: ${nit.isNotEmpty ? nit : 'N/A'}'
+                        : 'Registro Fiscal: ${legacy.isNotEmpty ? legacy : 'Sin registrar'}',
+                    style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primaryBlue),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Bonos 0% comisión disponibles: $credits',
+                          style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.navyDark),
+                        ),
+                        Row(
+                          children: [
+                            IconButton(
+                              tooltip: 'Quitar 1 bono',
+                              icon: const Icon(Icons.remove_circle_outline,
+                                  color: Colors.red, size: 20),
+                              onPressed: credits > 0
+                                  ? () => _adjustPromoCredits(c, -1)
+                                  : null,
+                            ),
+                            IconButton(
+                              tooltip: 'Otorgar +1 pedido sin comisión',
+                              icon: const Icon(Icons.add_circle_outline,
+                                  color: Color(0xFF16A34A), size: 20),
+                              onPressed: () => _adjustPromoCredits(c, 1),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  // --- SECCIÓN 4: MONITOR GLOBAL DE PEDIDOS Y AUDITORÍA DTE ---
+  Widget _buildGlobalOrdersTab(Map<String, dynamic> data) {
+    final globalOrders = (data['globalOrders'] as List<dynamic>? ?? [])
+        .cast<Map<String, dynamic>>();
+
+    final missingDteCount = globalOrders.where((o) {
+      final st = (o['status'] ?? '').toString().toLowerCase();
+      final pdf = (o['dte_pdf_url'] ?? '').toString();
+      final code = (o['dte_generation_code'] ?? '').toString();
+      return st == 'entregado' && pdf.isEmpty && code.isEmpty;
+    }).length;
+
+    final filtered = globalOrders.where((o) {
+      final st = (o['status'] ?? '').toString().toLowerCase();
+      final pdf = (o['dte_pdf_url'] ?? '').toString();
+      final gen = (o['dte_generation_code'] ?? '').toString();
+      final code = (o['code'] ?? '').toString().toLowerCase();
+      final rest = (o['restaurant_name'] ?? '').toString().toLowerCase();
+      final supp = (o['supplier_name'] ?? '').toString().toLowerCase();
+
+      final matchesSearch = _globalOrderSearchQuery.isEmpty ||
+          code.contains(_globalOrderSearchQuery) ||
+          rest.contains(_globalOrderSearchQuery) ||
+          supp.contains(_globalOrderSearchQuery);
+
+      bool matchesFilter = true;
+      if (_globalOrderFilter == 'sin_dte') {
+        matchesFilter = st == 'entregado' && pdf.isEmpty && gen.isEmpty;
+      } else if (_globalOrderFilter == 'pendiente') {
+        matchesFilter = st == 'pendiente';
+      } else if (_globalOrderFilter == 'entregado') {
+        matchesFilter = st == 'entregado';
+      }
+
+      return matchesSearch && matchesFilter;
+    }).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          margin: const EdgeInsets.only(bottom: 14),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Monitor Global de Órdenes y Auditoría DTE',
+                style: TextStyle(
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.navyDark),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _globalOrderSearchCtrl,
+                decoration: InputDecoration(
+                  hintText: 'Buscar por ORD-..., restaurante o distribuidor...',
+                  prefixIcon: const Icon(Icons.search, size: 18),
+                  filled: true,
+                  fillColor: const Color(0xFFF8FAFC),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SegmentedButton<String>(
+                  showSelectedIcon: false,
+                  segments: [
+                    ButtonSegment(
+                        value: 'todos',
+                        label: Text('Todas (${globalOrders.length})')),
+                    ButtonSegment(
+                        value: 'sin_dte',
+                        label: Text('Sin DTE ($missingDteCount)')),
+                    const ButtonSegment(
+                        value: 'pendiente', label: Text('Sin Pagar')),
+                    const ButtonSegment(
+                        value: 'entregado', label: Text('Entregadas')),
+                  ],
+                  selected: {_globalOrderFilter},
+                  onSelectionChanged: (v) =>
+                      setState(() => _globalOrderFilter = v.first),
+                ),
+              ),
+            ],
+          ),
+        ),
+        ...filtered.map((ord) {
+          final st = (ord['status'] ?? 'pendiente').toString();
+          final total = (ord['total_amount'] as num?)?.toDouble() ?? 0.0;
+          final dtePdf = (ord['dte_pdf_url'] ?? '').toString();
+          final dteCode = (ord['dte_generation_code'] ?? '').toString();
+          final hasDte = dtePdf.isNotEmpty || dteCode.isNotEmpty;
+          final taxLabel = (ord['tax_document_type'] ?? 'factura') == 'ccf'
+              ? 'CCF (DTE-03)'
+              : 'Factura (DTE-01)';
+
+          return Card(
+            margin: const EdgeInsets.only(bottom: 10),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: const BorderSide(color: Color(0xFFE2E8F0)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '${ord['code']} • $st',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            color: AppColors.navyDark),
+                      ),
+                      Text(
+                        '\$${total.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                            color: AppColors.primaryBlue),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${ord['restaurant_name']}  →  ${ord['supplier_name']}',
+                    style: const TextStyle(fontSize: 12.5),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: hasDte
+                              ? const Color(0xFFDCFCE7)
+                              : const Color(0xFFFEF3C7),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          hasDte
+                              ? '$taxLabel Adjunto'
+                              : '$taxLabel Pendiente de subir',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: hasDte
+                                ? const Color(0xFF16A34A)
+                                : const Color(0xFFB45309),
+                          ),
+                        ),
+                      ),
+                      if (dtePdf.isNotEmpty)
+                        TextButton.icon(
+                          icon: const Icon(Icons.picture_as_pdf, size: 15),
+                          label: const Text('Ver DTE',
+                              style: TextStyle(fontSize: 11.5)),
+                          onPressed: () => html.window.open(dtePdf, '_blank'),
+                        )
+                      else if (st.toLowerCase() == 'entregado')
+                        TextButton.icon(
+                          icon: const Icon(Icons.chat,
+                              size: 15, color: Color(0xFF25D366)),
+                          label: const Text('Recordar DTE',
+                              style: TextStyle(fontSize: 11.5)),
+                          onPressed: () => _contactViaWhatsApp(
+                            (ord['supplier_phone'] ?? '').toString(),
+                            (ord['supplier_name'] ?? '').toString(),
+                            'Hola ${ord['supplier_name']}, te recordamos subir el $taxLabel de la orden ${ord['code']} en Abasto para completar el respaldo fiscal del restaurante.',
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -1768,7 +2550,15 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
                 (route) => false,
               ),
             ),
-            title: Text(_currentNavIndex == 0 ? 'Liquidación a Distribuidores' : 'Cobranza y Restaurantes'),
+            title: Text(
+              _currentNavIndex == 0
+                  ? 'Liquidación a Distribuidores'
+                  : (_currentNavIndex == 1
+                      ? 'Cobranza y Restaurantes'
+                      : (_currentNavIndex == 2
+                          ? 'Comercios & Bonos'
+                          : 'Monitor Global & DTEs')),
+            ),
             centerTitle: !isDesktop,
             actions: [
               IconButton(
@@ -1786,12 +2576,22 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
               NavigationDestination(
                 icon: Icon(Icons.account_balance_wallet_outlined),
                 selectedIcon: Icon(Icons.account_balance_wallet),
-                label: 'Distribuidores & Banco',
+                label: 'Liquidaciones',
               ),
               NavigationDestination(
                 icon: Icon(Icons.restaurant_outlined),
                 selectedIcon: Icon(Icons.restaurant),
-                label: 'Restaurantes & Cobros',
+                label: 'Restaurantes',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.verified_user_outlined),
+                selectedIcon: Icon(Icons.verified_user),
+                label: 'Comercios',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.receipt_long_outlined),
+                selectedIcon: Icon(Icons.receipt_long),
+                label: 'Órdenes & DTE',
               ),
             ],
           ),
@@ -1820,8 +2620,12 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
                     children: [
                       if (_currentNavIndex == 0)
                         _buildSuppliersTab(data, isDesktop)
+                      else if (_currentNavIndex == 1)
+                        _buildRestaurantsTab(data, isDesktop)
+                      else if (_currentNavIndex == 2)
+                        _buildCommercesTab(data)
                       else
-                        _buildRestaurantsTab(data, isDesktop),
+                        _buildGlobalOrdersTab(data),
                     ],
                   ),
                 ),
