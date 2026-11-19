@@ -29,6 +29,8 @@ class _SupplierIncomingOrdersScreenState
     extends State<SupplierIncomingOrdersScreen> {
   RealtimeChannel? _ordersSubscription;
   RealtimeChannel? _payoutsSubscription;
+  RealtimeChannel? _messagesSubscription;
+  Set<String> _unreadOrderIds = {};
   late Future<List<Map<String, dynamic>>> _ordersFuture;
 
   final TextEditingController _searchCtrl = TextEditingController();
@@ -81,12 +83,32 @@ class _SupplierIncomingOrdersScreenState
           },
         )
         .subscribe();
+
+    _messagesSubscription = supabase
+        .channel('public:supplier_chat_unread_channel')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'order_messages',
+          callback: (payload) {
+            final newMsg = payload.newRecord;
+            final senderId = newMsg['sender_id']?.toString() ?? '';
+            final orderId = newMsg['order_id']?.toString() ?? '';
+            if (mounted &&
+                orderId.isNotEmpty &&
+                senderId != _currentUserId) {
+              setState(() => _unreadOrderIds.add(orderId));
+            }
+          },
+        )
+        .subscribe();
   }
 
   @override
   void dispose() {
     _ordersSubscription?.unsubscribe();
     _payoutsSubscription?.unsubscribe();
+    _messagesSubscription?.unsubscribe();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -251,6 +273,34 @@ class _SupplierIncomingOrdersScreenState
             prof?['is_verified'] == true || det?['is_verified'] == true;
       }
     }
+
+    try {
+      final orderIds = orders.map((o) => o['id'].toString()).toList();
+      if (orderIds.isNotEmpty) {
+        final msgs = await supabase
+            .from('order_messages')
+            .select('order_id, sender_id, created_at')
+            .filter('order_id', 'in', orderIds)
+            .neq('sender_id', _currentUserId)
+            .order('created_at', ascending: false);
+
+        final unread = <String>{};
+        for (final m in (msgs as List<dynamic>)) {
+          final oid = m['order_id']?.toString() ?? '';
+          if (oid.isEmpty || unread.contains(oid)) continue;
+          final msgTime = DateTime.tryParse(m['created_at'].toString());
+          final lastReadStr = html.window.localStorage[
+              'abasto_chat_read_${_currentUserId}_$oid'];
+          final lastRead =
+              lastReadStr != null ? DateTime.tryParse(lastReadStr) : null;
+          if (msgTime != null &&
+              (lastRead == null || msgTime.isAfter(lastRead))) {
+            unread.add(oid);
+          }
+        }
+        _unreadOrderIds = unread;
+      }
+    } catch (_) {}
 
     return orders;
   }
@@ -2179,10 +2229,19 @@ class _SupplierIncomingOrdersScreenState
             Row(
               children: [
                 Expanded(
-                  child: SizedBox(
-                    height: 38,
-                    child: OutlinedButton.icon(
-                      onPressed: () {
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      SizedBox(
+                        width: double.infinity,
+                        height: 38,
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            final oid = order['id'].toString();
+                            setState(() => _unreadOrderIds.remove(oid));
+                            html.window.localStorage[
+                                    'abasto_chat_read_${_currentUserId}_$oid'] =
+                                DateTime.now().toUtc().toIso8601String();
                         final orderObj = OrderModel(
                           id: order['id'].toString(),
                           code: code,
@@ -2216,13 +2275,29 @@ class _SupplierIncomingOrdersScreenState
                               otherPartyName: restaurantName,
                             ),
                           ),
-                        );
+                        ).then((_) => _refresh());
                       },
                       icon: const Icon(Icons.chat_bubble_outline, size: 15),
                       label: const Text('Chat', style: TextStyle(fontSize: 13)),
                     ),
                   ),
-                ),
+                  if (_unreadOrderIds.contains(order['id'].toString()))
+                    Positioned(
+                      top: -4,
+                      right: -4,
+                      child: Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEF4444),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
                 const SizedBox(width: 8),
                 PopupMenuButton<String>(
                   enabled: !isCancelado,

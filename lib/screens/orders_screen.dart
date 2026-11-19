@@ -23,6 +23,8 @@ class OrdersScreen extends StatefulWidget {
 
 class _OrdersScreenState extends State<OrdersScreen> {
   RealtimeChannel? _ordersSubscription;
+  RealtimeChannel? _messagesSubscription;
+  Set<String> _unreadOrderIds = {};
   late Future<List<Map<String, dynamic>>> _ordersFuture;
 
   String get _currentUserId =>
@@ -48,11 +50,31 @@ class _OrdersScreenState extends State<OrdersScreen> {
           },
         )
         .subscribe();
+
+    _messagesSubscription = supabase
+        .channel('public:restaurant_chat_unread_channel')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'order_messages',
+          callback: (payload) {
+            final newMsg = payload.newRecord;
+            final senderId = newMsg['sender_id']?.toString() ?? '';
+            final orderId = newMsg['order_id']?.toString() ?? '';
+            if (mounted &&
+                orderId.isNotEmpty &&
+                senderId != _currentUserId) {
+              setState(() => _unreadOrderIds.add(orderId));
+            }
+          },
+        )
+        .subscribe();
   }
 
   @override
   void dispose() {
     _ordersSubscription?.unsubscribe();
+    _messagesSubscription?.unsubscribe();
     super.dispose();
   }
 
@@ -101,6 +123,34 @@ class _OrdersScreenState extends State<OrdersScreen> {
         }
       } catch (_) {}
     }
+
+    try {
+      final orderIds = orders.map((o) => o['id'].toString()).toList();
+      if (orderIds.isNotEmpty) {
+        final msgs = await supabase
+            .from('order_messages')
+            .select('order_id, sender_id, created_at')
+            .filter('order_id', 'in', orderIds)
+            .neq('sender_id', _currentUserId)
+            .order('created_at', ascending: false);
+
+        final unread = <String>{};
+        for (final m in (msgs as List<dynamic>)) {
+          final oid = m['order_id']?.toString() ?? '';
+          if (oid.isEmpty || unread.contains(oid)) continue;
+          final msgTime = DateTime.tryParse(m['created_at'].toString());
+          final lastReadStr = html.window.localStorage[
+              'abasto_chat_read_${_currentUserId}_$oid'];
+          final lastRead =
+              lastReadStr != null ? DateTime.tryParse(lastReadStr) : null;
+          if (msgTime != null &&
+              (lastRead == null || msgTime.isAfter(lastRead))) {
+            unread.add(oid);
+          }
+        }
+        _unreadOrderIds = unread;
+      }
+    } catch (_) {}
 
     return orders;
   }
@@ -1232,56 +1282,87 @@ class _OrdersScreenState extends State<OrdersScreen> {
                   ),
                 ),
                 const SizedBox(width: 8),
+                
                 Expanded(
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1B3452),
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                    ),
-                    onPressed: () {
-                      final orderObj = OrderModel(
-                        id: order['id'].toString(),
-                        code: code,
-                        restaurantName: 'Mi Restaurante',
-                        supplierName: supplierName,
-                        supplierPhone: order['supplier_phone'] ?? '',
-                        items: items
-                            .map((i) => OrderItem(
-                                  productName: i['product_name'] ?? '',
-                                  quantity:
-                                      (i['quantity'] as num?)?.toInt() ?? 1,
-                                  unitPrice:
-                                      (i['unit_price'] as num?)?.toDouble() ??
-                                          0.0,
-                                ))
-                            .toList(),
-                        totalAmount: totalFinal,
-                        status: status == 'enRuta'
-                            ? OrderStatus.enRuta
-                            : (status == 'entregado'
-                                ? OrderStatus.entregado
-                                : OrderStatus.pendiente),
-                        deliveryDate: DateTime.now(),
-                      );
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1B3452),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10)),
+                          ),
+                          onPressed: () {
+                            final oid = order['id'].toString();
+                            setState(() => _unreadOrderIds.remove(oid));
+                            html.window.localStorage[
+                                    'abasto_chat_read_${_currentUserId}_$oid'] =
+                                DateTime.now().toUtc().toIso8601String();
 
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) =>
-                              OrderChatScreen(order: orderObj),
+                            final orderObj = OrderModel(
+                              id: oid,
+                              code: code,
+                              restaurantName: 'Mi Restaurante',
+                              supplierName: supplierName,
+                              supplierPhone: order['supplier_phone'] ?? '',
+                              items: items
+                                  .map((i) => OrderItem(
+                                        productName: i['product_name'] ?? '',
+                                        quantity:
+                                            (i['quantity'] as num?)?.toInt() ??
+                                                1,
+                                        unitPrice: (i['unit_price'] as num?)
+                                                ?.toDouble() ??
+                                            0.0,
+                                      ))
+                                  .toList(),
+                              totalAmount: totalFinal,
+                              status: status == 'enRuta'
+                                  ? OrderStatus.enRuta
+                                  : (status == 'entregado'
+                                      ? OrderStatus.entregado
+                                      : OrderStatus.pendiente),
+                              deliveryDate: DateTime.now(),
+                            );
+
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) =>
+                                    OrderChatScreen(order: orderObj),
+                              ),
+                            ).then((_) => _refresh());
+                          },
+                          icon: const Icon(Icons.chat_bubble_outline_rounded,
+                              color: AppColors.tealMint, size: 16),
+                          label: const Text('Chat',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.bold)),
                         ),
-                      );
-                    },
-                    icon: const Icon(Icons.chat_bubble_outline_rounded,
-                        color: AppColors.tealMint, size: 16),
-                    label: const Text('Chat',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.bold)),
+                      ),
+                      if (_unreadOrderIds.contains(order['id'].toString()))
+                        Positioned(
+                          top: -4,
+                          right: -4,
+                          child: Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEF4444),
+                              shape: BoxShape.circle,
+                              border:
+                                  Border.all(color: Colors.white, width: 2),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ],
