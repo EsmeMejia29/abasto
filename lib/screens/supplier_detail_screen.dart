@@ -37,7 +37,9 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
   int _freeCredits = 0;
   double _minOrderAmount = 0.0;
   final Map<String, int?> _productStocks = {};
-  final Map<String, List<Map<String, dynamic>>> _productTiers = {};
+  final Map<String, List<dynamic>> _productTiers = {};
+  final Map<String, String> _productDescriptions = {};
+  final Map<String, String> _productSkus = {};
   String _selectedTaxDoc = 'ccf'; // 'ccf' (Crédito Fiscal) o 'factura' (Consumidor Final)
   bool _hasCompleteTaxProfile = false;
 
@@ -124,6 +126,9 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
 
       final prodId = baseMap['id'].toString();
       _productStocks[prodId] = (baseMap['stock_quantity'] as num?)?.toInt();
+      _productDescriptions[prodId] =
+          (baseMap['description'] ?? baseMap['details'] ?? '').toString().trim();
+      _productSkus[prodId] = (baseMap['sku'] ?? '').toString().trim();
 
       final rawTiers = (baseMap['bulk_tiers'] as List<dynamic>?) ?? [];
       _productTiers[prodId] = rawTiers.map((t) {
@@ -297,6 +302,510 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     }
   }
 
+Widget _buildCartBody({
+    VoidCallback? onStateChanged,
+    VoidCallback? onCloseModal,
+    bool isSidebar = false,
+  }) {
+    final selectedProducts = _allProducts
+        .where((p) => (_selectedQuantities[p.id] ?? 0) > 0)
+        .toList();
+
+    double currentTotal = 0.0;
+    for (var p in selectedProducts) {
+      final q = _selectedQuantities[p.id] ?? 0;
+      currentTotal += q * _effectiveUnitPrice(p, q);
+    }
+
+    return Column(
+      mainAxisSize: isSidebar ? MainAxisSize.max : MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: AppColors.navyDark.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.shopping_cart_outlined,
+                      color: AppColors.navyDark, size: 20),
+                ),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Carrito de Pedido',
+                      style: TextStyle(
+                          fontSize: 16.5,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.navyDark),
+                    ),
+                    Text(
+                      widget.supplier.name,
+                      style: const TextStyle(
+                          fontSize: 11.5, color: AppColors.subtitleGrey),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            if (onCloseModal != null)
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: onCloseModal,
+              )
+            else if (selectedProducts.isNotEmpty)
+              TextButton(
+                onPressed: () {
+                  setState(() => _selectedQuantities.clear());
+                  onStateChanged?.call();
+                },
+                child: const Text(
+                  'Vaciar',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFFDC2626),
+                      fontWeight: FontWeight.w600),
+                ),
+              ),
+          ],
+        ),
+        const Divider(height: 18),
+
+        if (selectedProducts.isEmpty)
+          Expanded(
+            flex: isSidebar ? 1 : 0,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 32),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Icon(Icons.add_shopping_cart_rounded,
+                        size: 44, color: Color(0xFFCBD5E1)),
+                    SizedBox(height: 10),
+                    Text(
+                      'Tu carrito está vacío',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: AppColors.navyDark,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Selecciona insumos del catálogo para armar tu pedido.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          fontSize: 12, color: AppColors.subtitleGrey),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+        else
+          isSidebar
+              ? Expanded(
+                  child: ListView.separated(
+                    itemCount: selectedProducts.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, index) => _buildCartItemRow(
+                        selectedProducts[index], onStateChanged),
+                  ),
+                )
+              : ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 240),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: selectedProducts.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, index) => _buildCartItemRow(
+                        selectedProducts[index], onStateChanged),
+                  ),
+                ),
+
+        const Divider(height: 18),
+
+        const Text(
+          'Documento Tributario (DTE El Salvador):',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: AppColors.navyDark,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Expanded(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: () {
+                  setState(() => _selectedTaxDoc = 'ccf');
+                  onStateChanged?.call();
+                },
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: _selectedTaxDoc == 'ccf'
+                        ? AppColors.navyDark
+                        : const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: _selectedTaxDoc == 'ccf'
+                          ? AppColors.navyDark
+                          : const Color(0xFFCBD5E1),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Crédito Fiscal (CCF)',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.bold,
+                          color: _selectedTaxDoc == 'ccf'
+                              ? Colors.white
+                              : AppColors.navyDark,
+                        ),
+                      ),
+                      Text(
+                        'DTE-03 • Deduce 13% IVA',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: _selectedTaxDoc == 'ccf'
+                              ? AppColors.tealMint
+                              : AppColors.subtitleGrey,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: () {
+                  setState(() => _selectedTaxDoc = 'factura');
+                  onStateChanged?.call();
+                },
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: _selectedTaxDoc == 'factura'
+                        ? AppColors.navyDark
+                        : const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: _selectedTaxDoc == 'factura'
+                          ? AppColors.navyDark
+                          : const Color(0xFFCBD5E1),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Factura Electrónica',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.bold,
+                          color: _selectedTaxDoc == 'factura'
+                              ? Colors.white
+                              : AppColors.navyDark,
+                        ),
+                      ),
+                      Text(
+                        'DTE-01 • Consumidor Final',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: _selectedTaxDoc == 'factura'
+                              ? AppColors.tealMint
+                              : AppColors.subtitleGrey,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (_selectedTaxDoc == 'ccf' && !_hasCompleteTaxProfile) ...[
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEF3C7),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: const [
+                Icon(Icons.warning_amber_rounded,
+                    size: 15, color: Color(0xFFB45309)),
+                SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Completa tu NRC, NIT y Giro en "Mi Perfil" para recibir CCF.',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFFB45309),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 10),
+
+        if (_freeCredits > 0)
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: AppColors.tealMint.withOpacity(0.14),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.tealMint.withOpacity(0.5)),
+            ),
+            child: Row(
+              children: const [
+                Icon(Icons.card_giftcard_rounded,
+                    size: 16, color: Color(0xFF0F766E)),
+                SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '¡Bono Referido activo! 0% tarifa Abasto en este pedido.',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF0F766E),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Total a Pagar:',
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.navyDark),
+              ),
+              Text(
+                '\$${currentTotal.toStringAsFixed(2)}',
+                style: const TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.navyDark),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+
+        if (_minOrderAmount > 0 && currentTotal < _minOrderAmount) ...[
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEF3C7),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFF59E0B)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline,
+                    size: 16, color: Color(0xFFB45309)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Pedido mínimo: \$${_minOrderAmount.toStringAsFixed(2)} (faltan \$${(_minOrderAmount - currentTotal).toStringAsFixed(2)}).',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFFB45309),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+
+        if (selectedProducts.isNotEmpty)
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: () {
+                onCloseModal?.call();
+                _saveCurrentCartAsTemplate();
+              },
+              icon: const Icon(Icons.bookmark_add_outlined, size: 15),
+              label: const Text(
+                'Guardar como lista semanal',
+                style: TextStyle(fontSize: 11.5),
+              ),
+            ),
+          ),
+        const SizedBox(height: 8),
+
+        SizedBox(
+          width: double.infinity,
+          height: 44,
+          child: ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.navyDark,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            onPressed: selectedProducts.isEmpty ||
+                    _isSubmitting ||
+                    (_minOrderAmount > 0 && currentTotal < _minOrderAmount)
+                ? null
+                : () {
+                    onCloseModal?.call();
+                    _submitOrder(currentTotal);
+                  },
+            icon: const Icon(Icons.check_circle_outline,
+                size: 19, color: AppColors.tealMint),
+            label: Text(
+              'Confirmar Pedido (\$${currentTotal.toStringAsFixed(2)})',
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCartItemRow(Product product, VoidCallback? onStateChanged) {
+    final qty = _selectedQuantities[product.id] ?? 0;
+    final unitPrice = _effectiveUnitPrice(product, qty);
+    final itemTotal = qty * unitPrice;
+    final int? maxStock = _productStocks[product.id];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        children: [
+          _buildCartThumbnail(product.imageUrl),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  product.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: AppColors.navyDark,
+                  ),
+                ),
+                Text(
+                  '\$${unitPrice.toStringAsFixed(2)} • ${product.unit}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: AppColors.subtitleGrey,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                iconSize: 18,
+                icon: const Icon(Icons.remove_circle_outline,
+                    color: Color(0xFFDC2626)),
+                onPressed: () {
+                  setState(() {
+                    _selectedQuantities[product.id] = qty - 1;
+                  });
+                  onStateChanged?.call();
+                },
+              ),
+              Text(
+                '$qty',
+                style:
+                    const TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold),
+              ),
+              IconButton(
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                iconSize: 18,
+                icon: Icon(
+                  Icons.add_circle_outline,
+                  color: (maxStock != null && qty >= maxStock)
+                      ? Colors.grey
+                      : AppColors.primaryBlue,
+                ),
+                onPressed: (maxStock != null && qty >= maxStock)
+                    ? null
+                    : () {
+                        setState(() {
+                          _selectedQuantities[product.id] = qty + 1;
+                        });
+                        onStateChanged?.call();
+                      },
+              ),
+            ],
+          ),
+          SizedBox(
+            width: 54,
+            child: Text(
+              '\$${itemTotal.toStringAsFixed(2)}',
+              textAlign: TextAlign.end,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: AppColors.navyDark,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _openCartModal() {
     showModalBottomSheet(
       context: context,
@@ -304,16 +813,6 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
       backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setModalState) {
-          final selectedProducts = _allProducts
-              .where((p) => (_selectedQuantities[p.id] ?? 0) > 0)
-              .toList();
-
-          double currentTotal = 0.0;
-          for (var p in selectedProducts) {
-            final q = _selectedQuantities[p.id] ?? 0;
-            currentTotal += q * _effectiveUnitPrice(p, q);
-          }
-
           return Container(
             decoration: const BoxDecoration(
               color: Colors.white,
@@ -325,485 +824,10 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
               top: 20,
               bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.shopping_cart_outlined,
-                            color: AppColors.primaryBlue, size: 24),
-                        const SizedBox(width: 8),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Carrito de Pedido',
-                              style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.navyDark),
-                            ),
-                            Text(
-                              widget.supplier.name,
-                              style: const TextStyle(
-                                  fontSize: 12, color: AppColors.subtitleGrey),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.pop(ctx),
-                    ),
-                  ],
-                ),
-                const Divider(height: 20),
-
-                if (selectedProducts.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 30),
-                    child: Center(
-                      child: Column(
-                        children: const [
-                          Icon(Icons.remove_shopping_cart_outlined,
-                              size: 48, color: Colors.grey),
-                          SizedBox(height: 10),
-                          Text('Tu carrito está vacío.',
-                              style: TextStyle(color: AppColors.subtitleGrey)),
-                        ],
-                      ),
-                    ),
-                  )
-                else
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 260),
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: selectedProducts.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (_, index) {
-                        final product = selectedProducts[index];
-                        final qty = _selectedQuantities[product.id] ?? 0;
-                        final unitPrice = _effectiveUnitPrice(product, qty);
-                        final itemTotal = qty * unitPrice;
-                        final int? maxStock = _productStocks[product.id];
-
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          child: Row(
-                            children: [
-                              _buildCartThumbnail(product.imageUrl),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      product.name,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 14,
-                                        color: AppColors.navyDark,
-                                      ),
-                                    ),
-                                    Text(
-                                      '\$${unitPrice.toStringAsFixed(2)} • ${product.unit}',
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        color: AppColors.subtitleGrey,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Row(
-                                children: [
-                                  IconButton(
-                                    iconSize: 20,
-                                    splashRadius: 20,
-                                    icon: const Icon(Icons.remove_circle_outline,
-                                        color: Colors.red),
-                                    onPressed: () {
-                                      setState(() {
-                                        _selectedQuantities[product.id] =
-                                            qty - 1;
-                                      });
-                                      setModalState(() {});
-                                    },
-                                  ),
-                                  Text(
-                                    '$qty',
-                                    style: const TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.bold),
-                                  ),
-                                  IconButton(
-                                    iconSize: 20,
-                                    splashRadius: 20,
-                                    icon: Icon(
-                                      Icons.add_circle_outline,
-                                      color: (maxStock != null && qty >= maxStock)
-                                          ? Colors.grey
-                                          : AppColors.primaryBlue,
-                                    ),
-                                    onPressed: (maxStock != null && qty >= maxStock)
-                                        ? null
-                                        : () {
-                                            setState(() {
-                                              _selectedQuantities[product.id] =
-                                                  qty + 1;
-                                            });
-                                            setModalState(() {});
-                                          },
-                                  ),
-                                ],
-                              ),
-                              SizedBox(
-                                width: 60,
-                                child: Text(
-                                  '\$${itemTotal.toStringAsFixed(2)}',
-                                  textAlign: TextAlign.end,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: AppColors.navyDark,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-
-                const Divider(height: 20),
-
-                const Text(
-                  'Documento Tributario (DTE El Salvador):',
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.navyDark,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(10),
-                        onTap: () {
-                          setState(() => _selectedTaxDoc = 'ccf');
-                          setModalState(() {});
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: _selectedTaxDoc == 'ccf'
-                                ? AppColors.navyDark
-                                : const Color(0xFFF8FAFC),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: _selectedTaxDoc == 'ccf'
-                                  ? AppColors.navyDark
-                                  : const Color(0xFFCBD5E1),
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Crédito Fiscal (CCF)',
-                                style: TextStyle(
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.bold,
-                                  color: _selectedTaxDoc == 'ccf'
-                                      ? Colors.white
-                                      : AppColors.navyDark,
-                                ),
-                              ),
-                              Text(
-                                'DTE-03 • Deduce 13% IVA',
-                                style: TextStyle(
-                                  fontSize: 10.5,
-                                  color: _selectedTaxDoc == 'ccf'
-                                      ? AppColors.tealMint
-                                      : AppColors.subtitleGrey,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(10),
-                        onTap: () {
-                          setState(() => _selectedTaxDoc = 'factura');
-                          setModalState(() {});
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: _selectedTaxDoc == 'factura'
-                                ? AppColors.navyDark
-                                : const Color(0xFFF8FAFC),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: _selectedTaxDoc == 'factura'
-                                  ? AppColors.navyDark
-                                  : const Color(0xFFCBD5E1),
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Factura Electrónica',
-                                style: TextStyle(
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.bold,
-                                  color: _selectedTaxDoc == 'factura'
-                                      ? Colors.white
-                                      : AppColors.navyDark,
-                                ),
-                              ),
-                              Text(
-                                'DTE-01 • Consumidor Final',
-                                style: TextStyle(
-                                  fontSize: 10.5,
-                                  color: _selectedTaxDoc == 'factura'
-                                      ? AppColors.tealMint
-                                      : AppColors.subtitleGrey,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                if (_selectedTaxDoc == 'ccf' && !_hasCompleteTaxProfile) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 7),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFEF3C7),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: const [
-                        Icon(Icons.warning_amber_rounded,
-                            size: 16, color: Color(0xFFB45309)),
-                        SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            'Completa tu NRC, NIT y Giro en "Mi Perfil" para que el distribuidor emita tu CCF.',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFFB45309),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 12),
-                
-                if (_freeCredits > 0)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: AppColors.tealMint.withOpacity(0.14),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                          color: AppColors.tealMint.withOpacity(0.5)),
-                    ),
-                    child: Row(
-                      children: const [
-                        Icon(Icons.card_giftcard_rounded,
-                            size: 18, color: Color(0xFF0F766E)),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '¡Bono Referido activo! Se descontará el 3% de tarifa Abasto.',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF0F766E),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: Column(
-                    children: [
-                      if (_freeCredits > 0) ...[
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'Precio regular Abasto (+3%):',
-                              style: TextStyle(
-                                  fontSize: 12.5,
-                                  color: AppColors.subtitleGrey),
-                            ),
-                            Text(
-                              '\$${(currentTotal * (1 + _platformFeeRate)).toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                fontSize: 12.5,
-                                decoration: TextDecoration.lineThrough,
-                                color: AppColors.subtitleGrey,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'Descuento Tarifa Abasto (3%):',
-                              style: TextStyle(
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF0F766E)),
-                            ),
-                            Text(
-                              '-\$${((currentTotal * (1 + _platformFeeRate)) - currentTotal).toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF0F766E)),
-                            ),
-                          ],
-                        ),
-                        const Divider(height: 14),
-                      ],
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text(
-                            'Total a Pagar:',
-                            style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.navyDark),
-                          ),
-                          Text(
-                            '\$${currentTotal.toStringAsFixed(2)}',
-                            style: const TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.navyDark),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 14),
-
-                if (_minOrderAmount > 0 && currentTotal < _minOrderAmount) ...[
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFEF3C7),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFFF59E0B)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.info_outline,
-                            size: 18, color: Color(0xFFB45309)),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Pedido mínimo del distribuidor: \$${_minOrderAmount.toStringAsFixed(2)}. Te faltan \$${(_minOrderAmount - currentTotal).toStringAsFixed(2)} para confirmar.',
-                            style: const TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFFB45309),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-
-                if (selectedProducts.isNotEmpty) ...[
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        _saveCurrentCartAsTemplate();
-                      },
-                      icon: const Icon(Icons.bookmark_add_outlined, size: 17),
-                      label: const Text(
-                        'Guardar como lista semanal',
-                        style: TextStyle(fontSize: 12.5),
-                      ),
-                    ),
-                  ),
-                ],
-
-                SizedBox(
-                  width: double.infinity,
-                  height: 46,
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primaryBlue,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    onPressed: selectedProducts.isEmpty ||
-                            _isSubmitting ||
-                            (_minOrderAmount > 0 &&
-                                currentTotal < _minOrderAmount)
-                        ? null
-                        : () {
-                            Navigator.pop(ctx);
-                            _submitOrder(currentTotal);
-                          },
-                    icon: const Icon(Icons.check_circle_outline, size: 20),
-                    label: Text(
-                      'Confirmar Pedido (\$${currentTotal.toStringAsFixed(2)})',
-                      style: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ],
+            child: _buildCartBody(
+              onStateChanged: () => setModalState(() {}),
+              onCloseModal: () => Navigator.pop(ctx),
+              isSidebar: false,
             ),
           );
         },
@@ -1172,6 +1196,461 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     );
   }
 
+  void _openProductDetailModal(Product product) {
+    final bool isDesktop = MediaQuery.of(context).size.width >= 850;
+    final int? maxStock = _productStocks[product.id];
+    final tiers = _productTiers[product.id] ?? [];
+    final description = _productDescriptions[product.id] ?? '';
+    final sku = _productSkus[product.id] ?? '';
+
+    Widget buildDetailContent(StateSetter setModalState, VoidCallback close) {
+      final int qty = _selectedQuantities[product.id] ?? 0;
+      final double unitPrice =
+          _effectiveUnitPrice(product, qty > 0 ? qty : 1);
+      final bool hasTierDiscount = unitPrice < product.price;
+      final double subtotalItem = qty * unitPrice;
+
+      return SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Imagen superior con botón de cerrar y badge de categoría
+            Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(20),
+                  ),
+                  child: SizedBox(
+                    height: isDesktop ? 240 : 210,
+                    width: double.infinity,
+                    child: (product.imageUrl != null &&
+                            product.imageUrl!.isNotEmpty)
+                        ? Image.network(
+                            product.imageUrl!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Container(
+                              color: const Color(0xFFF1F5F9),
+                              child: const Icon(Icons.inventory_2_outlined,
+                                  size: 56, color: AppColors.primaryBlue),
+                            ),
+                          )
+                        : Container(
+                            color: const Color(0xFFF1F5F9),
+                            child: const Icon(Icons.inventory_2_outlined,
+                                size: 56, color: AppColors.primaryBlue),
+                          ),
+                  ),
+                ),
+                Positioned(
+                  top: 12,
+                  left: 12,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: AppColors.navyDark.withOpacity(0.88),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      product.category,
+                      style: const TextStyle(
+                        color: AppColors.tealMint,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 10,
+                  right: 10,
+                  child: Material(
+                    color: Colors.white.withOpacity(0.92),
+                    shape: const CircleBorder(),
+                    child: IconButton(
+                      icon: const Icon(Icons.close,
+                          size: 20, color: AppColors.navyDark),
+                      onPressed: close,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Título y presentación
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          product.name,
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.navyDark,
+                          ),
+                        ),
+                      ),
+                      if (sku.isNotEmpty)
+                        Container(
+                          margin: const EdgeInsets.only(left: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            'SKU: $sku',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.subtitleGrey,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+
+                  // Badges de Presentación y Disponibilidad
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryBlue.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.straighten_rounded,
+                                size: 14, color: AppColors.primaryBlue),
+                            const SizedBox(width: 5),
+                            Text(
+                              'Presentación: ${product.unit}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.primaryBlue,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFECFDF5),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFA7F3D0)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.check_circle_outline,
+                                size: 14, color: Color(0xFF0F766E)),
+                            const SizedBox(width: 5),
+                            Text(
+                              maxStock != null
+                                  ? 'Stock disponible: $maxStock'
+                                  : 'Disponible para despacho',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF0F766E),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Precio unitario y precio tachado si aplica descuento
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text(
+                        '\$${unitPrice.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.navyDark,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '/ ${product.unit}',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppColors.subtitleGrey,
+                        ),
+                      ),
+                      if (hasTierDiscount || _freeCredits > 0) ...[
+                        const SizedBox(width: 10),
+                        Text(
+                          '\$${(hasTierDiscount ? product.price : (product.price * (1 + _platformFeeRate))).toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            decoration: TextDecoration.lineThrough,
+                            color: AppColors.subtitleGrey,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Descripción / Especificaciones del insumo
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Especificaciones del Insumo',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.navyDark,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          description.isNotEmpty
+                              ? description
+                              : 'Insumo comercial abastecido por ${widget.supplier.name} en presentación de ${product.unit}. Precio incluye IVA (13%) para respaldo tributario.',
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            height: 1.4,
+                            color: Color(0xFF475569),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Escalas de precios por volumen (Mayoreo) si existen
+                  if (tiers.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF0FDF4),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFBBF7D0)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: const [
+                              Icon(Icons.local_offer_outlined,
+                                  size: 15, color: Color(0xFF0F766E)),
+                              SizedBox(width: 6),
+                              Text(
+                                'Precios por Volumen (Mayoreo)',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF0F766E),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          ...tiers.map((t) {
+                            final minQ = t['min_qty'] as int;
+                            final tPrice = t['price'] as double;
+                            final applied = qty >= minQ;
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(
+                                '${applied ? '✓ ' : '• '}Desde $minQ unidades: \$${tPrice.toStringAsFixed(2)} c/u',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: applied
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                  color: const Color(0xFF166534),
+                                ),
+                              ),
+                            );
+                          }),
+                        ],
+                      ),
+                    ),
+                  ],
+
+                  const SizedBox(height: 18),
+
+                  // Selector de cantidad + Botón de confirmar en carrito
+                  Row(
+                    children: [
+                      Container(
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFCBD5E1)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.remove,
+                                  color: Color(0xFFDC2626), size: 18),
+                              onPressed: qty > 0
+                                  ? () {
+                                      setState(() {
+                                        _selectedQuantities[product.id] =
+                                            qty - 1;
+                                      });
+                                      setModalState(() {});
+                                    }
+                                  : null,
+                            ),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 10),
+                              child: Text(
+                                '$qty',
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.navyDark,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              icon: Icon(
+                                Icons.add,
+                                size: 18,
+                                color: (maxStock != null && qty >= maxStock)
+                                    ? Colors.grey
+                                    : AppColors.primaryBlue,
+                              ),
+                              onPressed: (maxStock != null && qty >= maxStock)
+                                  ? null
+                                  : () {
+                                      setState(() {
+                                        _selectedQuantities[product.id] =
+                                            qty + 1;
+                                      });
+                                      setModalState(() {});
+                                    },
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: SizedBox(
+                          height: 44,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.navyDark,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            onPressed: () {
+                              if (qty == 0) {
+                                setState(() {
+                                  _selectedQuantities[product.id] = 1;
+                                });
+                              }
+                              close();
+                            },
+                            icon: const Icon(Icons.shopping_cart_checkout,
+                                size: 18, color: AppColors.tealMint),
+                            label: Text(
+                              qty == 0
+                                  ? 'Agregar (\$${unitPrice.toStringAsFixed(2)})'
+                                  : 'Listo (\$${subtotalItem.toStringAsFixed(2)})',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13.5,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (isDesktop) {
+      showDialog(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (context, setModalState) => Dialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480, maxHeight: 680),
+              child: buildDetailContent(
+                setModalState,
+                () => Navigator.pop(ctx),
+              ),
+            ),
+          ),
+        ),
+      );
+    } else {
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.white,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (ctx) => StatefulBuilder(
+          builder: (context, setModalState) => ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.85,
+            ),
+            child: buildDetailContent(
+              setModalState,
+              () => Navigator.pop(ctx),
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
   // Tarjeta de Insumo con altura fija protegida para evitar overflow
   Widget _buildGridProductCard(Product product) {
     final qty = _selectedQuantities[product.id] ?? 0;
@@ -1200,117 +1679,135 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // 1. Imagen Superior (se adapta dinámicamente)
+          // 1. Imagen Superior clicable para ver detalles
           Expanded(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                ClipRRect(
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
-                  child: (product.imageUrl != null && product.imageUrl!.isNotEmpty)
-                      ? Image.network(
-                          product.imageUrl!,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
+            child: InkWell(
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(13)),
+              onTap: () => _openProductDetailModal(product),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(13)),
+                    child: (product.imageUrl != null &&
+                            product.imageUrl!.isNotEmpty)
+                        ? Image.network(
+                            product.imageUrl!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Container(
+                              color: const Color(0xFFF1F5F9),
+                              child: const Icon(Icons.inventory_2_outlined,
+                                  color: AppColors.primaryBlue, size: 36),
+                            ),
+                          )
+                        : Container(
                             color: const Color(0xFFF1F5F9),
-                            child: const Icon(Icons.inventory_2_outlined, color: AppColors.primaryBlue, size: 36),
+                            child: const Icon(Icons.inventory_2_outlined,
+                                color: AppColors.primaryBlue, size: 36),
                           ),
-                        )
-                      : Container(
-                          color: const Color(0xFFF1F5F9),
-                          child: const Icon(Icons.inventory_2_outlined, color: AppColors.primaryBlue, size: 36),
+                  ),
+                  if (hasSelection)
+                    Positioned(
+                      top: 6,
+                      right: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryBlue,
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                ),
-                if (hasSelection)
-                  Positioned(
-                    top: 6,
-                    right: 6,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppColors.primaryBlue,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        '$qty en carrito',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
+                        child: Text(
+                          '$qty en carrito',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
 
-          // 2. Información y Controles (bloque inferior con tamaño ajustado)
+          // 2. Información (clicable) y Controles de cantidad
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  product.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                    color: AppColors.navyDark,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '${product.category} • ${product.unit}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: AppColors.subtitleGrey,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Text(
-                      '\$${unitPrice.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                        color: AppColors.primaryBlue,
-                      ),
-                    ),
-                    if (hasTierDiscount || _freeCredits > 0) ...[
-                      const SizedBox(width: 6),
+                InkWell(
+                  onTap: () => _openProductDetailModal(product),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Text(
-                        '\$${(hasTierDiscount ? product.price : (product.price * (1 + _platformFeeRate))).toStringAsFixed(2)}',
+                        product.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 11.5,
-                          decoration: TextDecoration.lineThrough,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                          color: AppColors.navyDark,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${product.category} • ${product.unit}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11,
                           color: AppColors.subtitleGrey,
                         ),
                       ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Text(
+                            '\$${unitPrice.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: AppColors.primaryBlue,
+                            ),
+                          ),
+                          if (hasTierDiscount || _freeCredits > 0) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              '\$${(hasTierDiscount ? product.price : (product.price * (1 + _platformFeeRate))).toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                decoration: TextDecoration.lineThrough,
+                                color: AppColors.subtitleGrey,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      if (tiers.isNotEmpty)
+                        Text(
+                          hasTierDiscount
+                              ? '¡Precio mayoreo aplicado!'
+                              : '${tiers.first['min_qty']}+ unid. a \$${(tiers.first['price'] as double).toStringAsFixed(2)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: hasTierDiscount
+                                ? const Color(0xFF0F766E)
+                                : AppColors.primaryBlue,
+                          ),
+                        ),
                     ],
-                  ],
-                ),
-                if (tiers.isNotEmpty)
-                  Text(
-                    hasTierDiscount
-                        ? '¡Precio mayoreo aplicado!'
-                        : '${tiers.first['min_qty']}+ unid. a \$${(tiers.first['price'] as double).toStringAsFixed(2)}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: hasTierDiscount
-                          ? const Color(0xFF0F766E)
-                          : AppColors.primaryBlue,
-                    ),
                   ),
+                ),
                 const SizedBox(height: 6),
 
                 // Selector de cantidad
@@ -1370,6 +1867,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
           ),
         ],
       ),
+    
     );
   }
 
@@ -1413,188 +1911,222 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
             );
           }
 
-          return Column(
-            children: [
-              _buildSupplierHeader(),
+return LayoutBuilder(
+            builder: (context, screenConstraints) {
+              final bool isDesktop = screenConstraints.maxWidth >= 900;
 
-              // Buscador de productos
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
-                child: TextField(
-                  controller: _searchCtrl,
-                  onChanged: (_) => _applyFilters(),
-                  decoration: InputDecoration(
-                    hintText: 'Buscar insumo en ${widget.supplier.name}...',
-                    prefixIcon: const Icon(Icons.search, size: 20),
-                    filled: true,
-                    fillColor: Colors.white,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(color: Colors.grey.shade300),
+              final catalogColumn = Column(
+                children: [
+                  _buildSupplierHeader(),
+
+                  // Buscador de productos
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+                    child: TextField(
+                      controller: _searchCtrl,
+                      onChanged: (_) => _applyFilters(),
+                      decoration: InputDecoration(
+                        hintText:
+                            'Buscar insumo en ${widget.supplier.name}...',
+                        prefixIcon: const Icon(Icons.search, size: 20),
+                        filled: true,
+                        fillColor: Colors.white,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(color: Colors.grey.shade300),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
 
-              // Chips de categorías
-              if (_supplierCategories.length > 2)
-                SizedBox(
-                  height: 44,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    itemCount: _supplierCategories.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 6),
-                    itemBuilder: (context, idx) {
-                      final cat = _supplierCategories[idx];
-                      final isSelected = _selectedCategory == cat;
-                      return ChoiceChip(
-                        label: Text(cat),
-                        selected: isSelected,
-                        selectedColor: AppColors.primaryBlue,
-                        labelStyle: TextStyle(
-                          color: isSelected ? Colors.white : AppColors.navyDark,
-                          fontSize: 12,
-                        ),
-                        onSelected: (val) {
-                          if (val) {
-                            setState(() => _selectedCategory = cat);
-                            _applyFilters();
-                          }
-                        },
-                      );
-                    },
-                  ),
-                ),
-
-              const SizedBox(height: 6),
-
-              // Grid con relación de aspecto calculada para que nunca desborde
-              Expanded(
-                child: _filteredProducts.isEmpty
-                    ? Center(
-                        child: Text(
-                          'No se encontraron insumos con esos filtros.',
-                          style: TextStyle(color: Colors.grey.shade600),
-                        ),
-                      )
-                    : LayoutBuilder(
-                        builder: (context, constraints) {
-                          int crossAxisCount = 2;
-                          double aspectRatio = 0.70;
-
-                          if (constraints.maxWidth > 1150) {
-                            crossAxisCount = 5;
-                            aspectRatio = 0.72;
-                          } else if (constraints.maxWidth > 850) {
-                            crossAxisCount = 4;
-                            aspectRatio = 0.70;
-                          } else if (constraints.maxWidth > 600) {
-                            crossAxisCount = 3;
-                            aspectRatio = 0.68;
-                          }
-
-                          return GridView.builder(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 8),
-                            gridDelegate:
-                                SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: crossAxisCount,
-                              crossAxisSpacing: 12,
-                              mainAxisSpacing: 12,
-                              childAspectRatio: aspectRatio,
+                  // Chips de categorías
+                  if (_supplierCategories.length > 2)
+                    SizedBox(
+                      height: 44,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        itemCount: _supplierCategories.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 6),
+                        itemBuilder: (context, idx) {
+                          final cat = _supplierCategories[idx];
+                          final isSelected = _selectedCategory == cat;
+                          return ChoiceChip(
+                            label: Text(cat),
+                            selected: isSelected,
+                            selectedColor: AppColors.navyDark,
+                            labelStyle: TextStyle(
+                              color: isSelected
+                                  ? Colors.white
+                                  : AppColors.navyDark,
+                              fontWeight: isSelected
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                              fontSize: 12,
                             ),
-                            itemCount: _filteredProducts.length,
-                            itemBuilder: (context, index) {
-                              return _buildGridProductCard(_filteredProducts[index]);
+                            onSelected: (val) {
+                              if (val) {
+                                setState(() => _selectedCategory = cat);
+                                _applyFilters();
+                              }
                             },
                           );
                         },
                       ),
-              ),
+                    ),
 
-              // Barra inferior interactiva con Total Integrado
-              if (currentTotal > 0)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.08),
-                        blurRadius: 10,
-                        offset: const Offset(0, -4),
-                      ),
-                    ],
+                  const SizedBox(height: 6),
+
+                  // Grid de productos
+                  Expanded(
+                    child: _filteredProducts.isEmpty
+                        ? Center(
+                            child: Text(
+                              'No se encontraron insumos con esos filtros.',
+                              style: TextStyle(color: Colors.grey.shade600),
+                            ),
+                          )
+                        : LayoutBuilder(
+                            builder: (context, gridConstraints) {
+                              int crossAxisCount = 2;
+                              double aspectRatio = 0.70;
+
+                              if (gridConstraints.maxWidth > 950) {
+                                crossAxisCount = 4;
+                                aspectRatio = 0.72;
+                              } else if (gridConstraints.maxWidth > 620) {
+                                crossAxisCount = 3;
+                                aspectRatio = 0.70;
+                              }
+
+                              return GridView.builder(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 8),
+                                gridDelegate:
+                                    SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: crossAxisCount,
+                                  crossAxisSpacing: 12,
+                                  mainAxisSpacing: 12,
+                                  childAspectRatio: aspectRatio,
+                                ),
+                                itemCount: _filteredProducts.length,
+                                itemBuilder: (context, index) {
+                                  return _buildGridProductCard(
+                                      _filteredProducts[index]);
+                                },
+                              );
+                            },
+                          ),
                   ),
-                  child: SafeArea(
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        InkWell(
-                          onTap: _openCartModal,
-                          borderRadius: BorderRadius.circular(8),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Row(
+
+                  // Barra inferior solo en móvil/tablet
+                  if (!isDesktop && currentTotal > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.08),
+                            blurRadius: 10,
+                            offset: const Offset(0, -4),
+                          ),
+                        ],
+                      ),
+                      child: SafeArea(
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            InkWell(
+                              onTap: _openCartModal,
+                              borderRadius: BorderRadius.circular(8),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.shopping_cart_outlined,
-                                        size: 15,
-                                        color: AppColors.primaryBlue),
-                                    const SizedBox(width: 4),
+                                    Row(
+                                      children: [
+                                        const Icon(
+                                            Icons.shopping_cart_outlined,
+                                            size: 15,
+                                            color: AppColors.primaryBlue),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          '$totalItems insumo(s) • Ver Carrito',
+                                          style: const TextStyle(
+                                            color: AppColors.primaryBlue,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 2),
                                     Text(
-                                      '$totalItems insumo(s) • Ver Carrito',
+                                      'Total: \$${currentTotal.toStringAsFixed(2)}',
                                       style: const TextStyle(
-                                        color: AppColors.primaryBlue,
-                                        fontSize: 12,
+                                        fontSize: 18,
                                         fontWeight: FontWeight.bold,
+                                        color: AppColors.navyDark,
                                       ),
                                     ),
                                   ],
                                 ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'Total: \$${currentTotal.toStringAsFixed(2)}',
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: AppColors.navyDark,
-                                  ),
+                              ),
+                            ),
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.navyDark,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 22, vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
-                              ],
+                              ),
+                              onPressed: _isSubmitting ? null : _openCartModal,
+                              icon: const Icon(Icons.shopping_bag_outlined,
+                                  size: 18, color: AppColors.tealMint),
+                              label: const Text(
+                                'Ver Carrito',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
                             ),
-                          ),
+                          ],
                         ),
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.primaryBlue,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 22, vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                          onPressed: _isSubmitting ? null : _openCartModal,
-                          icon: const Icon(Icons.shopping_bag_outlined,
-                              size: 18),
-                          label: const Text(
-                            'Ver Carrito',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
+                ],
+              );
+
+              if (!isDesktop) {
+                return catalogColumn;
+              }
+
+              // Vista Escritorio: Catálogo a la izquierda + Carrito fijo a la derecha
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: catalogColumn),
+                  Container(
+                    width: 390,
+                    padding: const EdgeInsets.all(18),
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      border: Border(
+                        left: BorderSide(color: Color(0xFFE2E8F0)),
+                      ),
+                    ),
+                    child: _buildCartBody(isSidebar: true),
                   ),
-                ),
-            ],
+                ],
+              );
+            },
           );
         },
       ),

@@ -882,32 +882,53 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
         _products.where((p) => (p['is_available'] ?? true) == true).length;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: const Color(0xFFF1F5F9),
       appBar: AppBar(
-        title: const Text('Mi Catálogo de Insumos',
-            style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: const Color(0xFF001A2C),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: AppColors.tealMint.withOpacity(0.16),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.inventory_2_rounded,
+                  color: AppColors.tealMint, size: 19),
+            ),
+            const SizedBox(width: 10),
+            const Text(
+              'Mi Catálogo de Insumos',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+          ],
+        ),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
             child: ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.navyDark,
-                foregroundColor: Colors.white,
+                backgroundColor: AppColors.tealMint,
+                foregroundColor: const Color(0xFF001A2C),
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(20),
                 ),
               ),
               onPressed: () => _openProductDialog(),
-              icon: const Icon(Icons.add, size: 18, color: AppColors.tealMint),
+              icon: const Icon(Icons.add_rounded, size: 18),
               label: const Text(
                 'Nuevo Insumo',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
               ),
             ),
           ),
           IconButton(
             tooltip: 'Actualizar catálogo',
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             onPressed: _loadSupplierInfoAndProducts,
           ),
         ],

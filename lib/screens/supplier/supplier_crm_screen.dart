@@ -858,25 +858,55 @@ class _SupplierCrmScreenState extends State<SupplierCrmScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: const Color(0xFFF1F5F9),
       appBar: AppBar(
-        title: const Text('CRM & Rendimiento'),
+        backgroundColor: const Color(0xFF001A2C),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: AppColors.tealMint.withOpacity(0.16),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.analytics_rounded,
+                  color: AppColors.tealMint, size: 19),
+            ),
+            const SizedBox(width: 10),
+            const Text(
+              'CRM & Rendimiento',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+          ],
+        ),
         actions: [
-          TextButton.icon(
-            onPressed: _exportCsvReport,
-            icon: const Icon(Icons.download_rounded,
-                size: 18, color: AppColors.navyDark),
-            label: const Text(
-              'Exportar CSV',
-              style: TextStyle(
-                color: AppColors.navyDark,
-                fontWeight: FontWeight.bold,
-                fontSize: 13,
+          Container(
+            margin: const EdgeInsets.symmetric(vertical: 8),
+            child: TextButton.icon(
+              style: TextButton.styleFrom(
+                backgroundColor: Colors.white.withOpacity(0.10),
+                foregroundColor: AppColors.tealMint,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+              onPressed: _exportCsvReport,
+              icon: const Icon(Icons.download_rounded, size: 17),
+              label: const Text(
+                'Exportar CSV',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12.5,
+                ),
               ),
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.refresh),
+            tooltip: 'Actualizar datos',
+            icon: const Icon(Icons.refresh_rounded),
             onPressed: _fetchSupplierCrmData,
           ),
         ],

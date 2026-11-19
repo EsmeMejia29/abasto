@@ -258,18 +258,18 @@ class _SupplierIncomingOrdersScreenState
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
       case 'entregado':
-        return Colors.green;
+        return const Color(0xFF0F766E);
       case 'enruta':
       case 'en ruta':
-        return Colors.blue;
-      case 'confirmado':
-        return AppColors.tealMint;
-      case 'pendiente':
-        return Colors.orange;
-      case 'cancelado':
-        return Colors.red;
-      default:
         return AppColors.primaryBlue;
+      case 'confirmado':
+        return const Color(0xFF059669);
+      case 'pendiente':
+        return const Color(0xFFD97706);
+      case 'cancelado':
+        return const Color(0xFFDC2626);
+      default:
+        return AppColors.navyDark;
     }
   }
 
@@ -367,15 +367,15 @@ class _SupplierIncomingOrdersScreenState
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
+          colors: [Color(0xFF001A2C), Color(0xFF1B3452)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 10,
+            color: const Color(0xFF001A2C).withOpacity(0.14),
+            blurRadius: 12,
             offset: const Offset(0, 4),
           ),
         ],
@@ -388,13 +388,13 @@ class _SupplierIncomingOrdersScreenState
               Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(8),
+                    padding: const EdgeInsets.all(9),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.12),
+                      color: AppColors.tealMint.withOpacity(0.16),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: const Icon(Icons.account_balance_wallet_outlined,
-                        color: Colors.white, size: 22),
+                        color: AppColors.tealMint, size: 22),
                   ),
                   const SizedBox(width: 12),
                   Column(
@@ -404,14 +404,14 @@ class _SupplierIncomingOrdersScreenState
                         'Saldo por Liquidar',
                         style: TextStyle(
                           color: Colors.white,
-                          fontSize: 14,
+                          fontSize: 14.5,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       Text(
                         'Corte semanal: Viernes',
                         style: TextStyle(
-                          color: Color(0xFF94A3B8),
+                          color: Color(0xFFCBD5E1),
                           fontSize: 12,
                         ),
                       ),
@@ -422,22 +422,22 @@ class _SupplierIncomingOrdersScreenState
               Text(
                 '\$${totalPorLiquidar.toStringAsFixed(2)}',
                 style: const TextStyle(
-                  color: Color(0xFF4ADE80),
-                  fontSize: 22,
+                  color: AppColors.tealMint,
+                  fontSize: 23,
                   fontWeight: FontWeight.bold,
                 ),
               ),
             ],
           ),
           const SizedBox(height: 12),
-          const Divider(color: Color(0xFF334155), height: 1),
+          Divider(color: Colors.white.withOpacity(0.15), height: 1),
           const SizedBox(height: 10),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
                 'Retención Abasto por pedido: 5%',
-                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                style: TextStyle(color: Color(0xFFCBD5E1), fontSize: 11.5),
               ),
               InkWell(
                 onTap: () {
@@ -453,15 +453,15 @@ class _SupplierIncomingOrdersScreenState
                   padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                   child: Row(
                     children: const [
-                      Icon(Icons.account_balance, color: Colors.white70, size: 14),
+                      Icon(Icons.account_balance_outlined,
+                          color: AppColors.tealMint, size: 14),
                       SizedBox(width: 5),
                       Text(
                         'Configurar Cuenta Bancaria',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: AppColors.tealMint,
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
-                          decoration: TextDecoration.underline,
                         ),
                       ),
                     ],
@@ -1074,11 +1074,14 @@ class _SupplierIncomingOrdersScreenState
           color: isSelected ? Colors.white : const Color(0xFF475569),
         ),
         backgroundColor: Colors.white,
-        selectedColor: AppColors.primaryBlue,
+        selectedColor: const Color(0xFF001A2C),
+        checkmarkColor: AppColors.tealMint,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
           side: BorderSide(
-            color: isSelected ? AppColors.primaryBlue : Colors.grey.shade300,
+            color: isSelected
+                ? const Color(0xFF001A2C)
+                : const Color(0xFFCBD5E1),
           ),
         ),
         onSelected: (_) {
@@ -1767,11 +1770,20 @@ class _SupplierIncomingOrdersScreenState
     final items = (order['order_items'] as List<dynamic>?) ?? [];
     final bool isLiquidado = _paidOrderIds.contains(order['id'].toString());
 
-    return Card(
-      elevation: 1.5,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: Colors.grey.shade200),
+    final statusColor = _getStatusColor(status);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0), width: 1.0),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF001A2C).withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1905,15 +1917,16 @@ class _SupplierIncomingOrdersScreenState
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: _getStatusColor(status).withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(8),
+                    color: statusColor.withOpacity(0.11),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: statusColor.withOpacity(0.3)),
                   ),
                   child: Text(
                     _formatStatus(status),
                     style: TextStyle(
-                      color: _getStatusColor(status),
+                      color: statusColor,
                       fontWeight: FontWeight.bold,
-                      fontSize: 12,
+                      fontSize: 11.5,
                     ),
                   ),
                 ),
@@ -2342,21 +2355,50 @@ class _SupplierIncomingOrdersScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: const Color(0xFFF1F5F9),
       appBar: AppBar(
-        title: const Text('Despacho de Pedidos'),
+        backgroundColor: const Color(0xFF001A2C),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: AppColors.tealMint.withOpacity(0.16),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.local_shipping_rounded,
+                  color: AppColors.tealMint, size: 19),
+            ),
+            const SizedBox(width: 10),
+            const Text(
+              'Despacho de Pedidos',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+          ],
+        ),
         actions: [
-          TextButton.icon(
-            onPressed: () =>
-                InteractiveTutorialModal.show(context, isSupplier: true),
-            icon: const Icon(Icons.help_outline_rounded,
-                size: 18, color: AppColors.primaryBlue),
-            label: const Text(
-              'Tutorial',
-              style: TextStyle(
-                color: AppColors.primaryBlue,
-                fontWeight: FontWeight.bold,
-                fontSize: 13,
+          Container(
+            margin: const EdgeInsets.symmetric(vertical: 8),
+            child: TextButton.icon(
+              style: TextButton.styleFrom(
+                backgroundColor: Colors.white.withOpacity(0.10),
+                foregroundColor: AppColors.tealMint,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+              onPressed: () =>
+                  InteractiveTutorialModal.show(context, isSupplier: true),
+              icon: const Icon(Icons.help_outline_rounded, size: 17),
+              label: const Text(
+                'Tutorial',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12.5,
+                ),
               ),
             ),
           ),
@@ -2365,7 +2407,11 @@ class _SupplierIncomingOrdersScreenState
             icon: const Icon(Icons.download_rounded),
             onPressed: _exportSupplierSalesCsv,
           ),
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _refresh),
+          IconButton(
+            tooltip: 'Actualizar',
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: _refresh,
+          ),
         ],
       ),
       body: FutureBuilder<List<Map<String, dynamic>>>(
