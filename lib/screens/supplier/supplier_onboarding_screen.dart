@@ -1,3 +1,4 @@
+import 'dart:ui_web' as ui_web;
 import 'dart:html' as html;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -56,6 +57,28 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
   );
   final _minOrderCtrl = TextEditingController(text: '25.00');
 
+  // Ubicación exacta y Mapa Google
+  String _selectedZone = 'Santa Tecla';
+  final _customZoneCtrl = TextEditingController();
+  final List<String> _zonesSV = [
+    'Santa Tecla',
+    'Antiguo Cuscatlán',
+    'San Salvador',
+    'Soyapango',
+    'Lourdes Colón',
+    'La Libertad',
+    'Santa Ana',
+    'San Miguel',
+    'Otro (especificar)',
+  ];
+  final _searchLocationCtrl =
+      TextEditingController(text: 'Santa Tecla, La Libertad');
+  String _currentMapQuery = 'Santa Tecla, El Salvador';
+  double? _selectedLat;
+  double? _selectedLng;
+  final String _mapViewId =
+      'supplier-maps-onboarding-${DateTime.now().millisecondsSinceEpoch}';
+
   // Paso 3: Catálogo inicial (Tabla 'products')
   bool _startCatalogFromZero = false;
   final List<Map<String, dynamic>> _initialProducts = [];
@@ -63,8 +86,75 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
   @override
   void initState() {
     super.initState();
+    _registerMapElement();
     _addProductRow();
     _loadExistingProfileData();
+  }
+
+  void _registerMapElement() {
+    ui_web.platformViewRegistry.registerViewFactory(_mapViewId, (int viewId) {
+      final iframe = html.IFrameElement()
+        ..src =
+            'https://maps.google.com/maps?q=${Uri.encodeComponent(_currentMapQuery)}&t=&z=15&ie=UTF8&iwloc=&output=embed'
+        ..style.border = '0'
+        ..style.width = '100%'
+        ..style.height = '100%'
+        ..allowFullscreen = false;
+      return iframe;
+    });
+  }
+
+  void _updateMapSearch(String query) {
+    final clean = query.trim();
+    if (clean.isEmpty) return;
+
+    setState(() {
+      _currentMapQuery = '$clean, El Salvador';
+      _addressCtrl.text = clean;
+    });
+
+    final element =
+        html.document.getElementById(_mapViewId) as html.IFrameElement?;
+    if (element != null) {
+      element.src =
+          'https://maps.google.com/maps?q=${Uri.encodeComponent(_currentMapQuery)}&t=&z=15&ie=UTF8&iwloc=&output=embed';
+    }
+  }
+
+  Future<void> _captureCurrentGps() async {
+    try {
+      final pos = await html.window.navigator.geolocation.getCurrentPosition();
+      final lat = pos.coords?.latitude?.toDouble();
+      final lng = pos.coords?.longitude?.toDouble();
+      if (lat != null && lng != null && mounted) {
+        setState(() {
+          _selectedLat = lat;
+          _selectedLng = lng;
+          _currentMapQuery = '$lat,$lng';
+        });
+        final element =
+            html.document.getElementById(_mapViewId) as html.IFrameElement?;
+        if (element != null) {
+          element.src =
+              'https://maps.google.com/maps?q=$lat,$lng&t=&z=16&ie=UTF8&iwloc=&output=embed';
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Coordenadas GPS de bodega guardadas con éxito.'),
+            backgroundColor: AppColors.tealMint,
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'No se pudo obtener GPS automático; se usará la zona seleccionada.'),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _loadExistingProfileData() async {
@@ -113,6 +203,19 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
             if ((profile['business_hours'] ?? '').toString().isNotEmpty) {
               _businessHoursCtrl.text = profile['business_hours'];
             }
+            if ((profile['address'] ?? '').toString().isNotEmpty) {
+              _searchLocationCtrl.text = profile['address'];
+              _currentMapQuery = '${profile['address']}, El Salvador';
+            }
+            if ((profile['location'] ?? '').toString().isNotEmpty) {
+              final loc = profile['location'].toString();
+              if (_zonesSV.contains(loc)) {
+                _selectedZone = loc;
+              } else {
+                _selectedZone = 'Otro (especificar)';
+                _customZoneCtrl.text = loc;
+              }
+            }
           });
         }
       }
@@ -140,6 +243,8 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
     _coverageCtrl.dispose();
     _deliveryDaysCtrl.dispose();
     _minOrderCtrl.dispose();
+    _customZoneCtrl.dispose();
+    _searchLocationCtrl.dispose();
     for (var row in _initialProducts) {
       (row['name'] as TextEditingController).dispose();
       (row['unit'] as TextEditingController).dispose();
@@ -290,6 +395,10 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
         if (nitVal.isNotEmpty) 'NIT: $nitVal',
       ].join(' | ');
 
+      final effectiveZone = _selectedZone == 'Otro (especificar)'
+          ? _customZoneCtrl.text.trim()
+          : _selectedZone;
+
       await supabase.from('profiles').upsert({
         'id': userId,
         'business_name': _businessNameCtrl.text.trim().isNotEmpty
@@ -299,6 +408,7 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
         'address': _addressCtrl.text.trim().isNotEmpty
             ? _addressCtrl.text.trim()
             : 'Dirección central de distribución',
+        'location': effectiveZone.isNotEmpty ? effectiveZone : 'Santa Tecla',
         'legal_name': _legalNameCtrl.text.trim(),
         'nrc': nrcVal,
         'nit': nitVal,
@@ -311,7 +421,7 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
         'role': 'supplier',
       });
 
-      // 2. Guardar datos logísticos en supplier_details
+      // 2. Guardar datos logísticos y coordenadas en supplier_details
       await supabase.from('supplier_details').upsert({
         'profile_id': userId,
         'category': consolidatedCategory,
@@ -321,6 +431,8 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
               _minOrderCtrl.text.replaceAll(r'$', '').trim(),
             ) ??
             0.00,
+        if (_selectedLat != null) 'latitude': _selectedLat,
+        if (_selectedLng != null) 'longitude': _selectedLng,
         'onboarding_completed': true,
       });
 
@@ -490,18 +602,6 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
             labelText: 'Teléfono / WhatsApp de Despacho',
             hintText: 'Ej. 7000-0000',
             prefixIcon: Icon(Icons.phone_outlined),
-            border: OutlineInputBorder(),
-            isDense: true,
-          ),
-        ),
-        const SizedBox(height: 14),
-
-        TextField(
-          controller: _addressCtrl,
-          decoration: const InputDecoration(
-            labelText: 'Dirección Física / Bodega Principal',
-            hintText: 'Ej. Calle El Pedregal, Bodega #4, Antiguo Cuscatlán',
-            prefixIcon: Icon(Icons.location_on_outlined),
             border: OutlineInputBorder(),
             isDense: true,
           ),
@@ -698,9 +798,8 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
         const SizedBox(height: 24),
         const Divider(),
         const SizedBox(height: 14),
-
         const Text(
-          'Zonas y frecuencia de reparto',
+          'Ubicación, zonas y frecuencia de reparto',
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.bold,
@@ -709,11 +808,138 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
         ),
         const SizedBox(height: 4),
         const Text(
-          'Define tus rutas y el monto mínimo requerido para entregar pedidos.',
+          'Define la ubicación de tu bodega, tus rutas y el monto mínimo de pedido.',
           style: TextStyle(fontSize: 13, color: AppColors.subtitleGrey),
         ),
         const SizedBox(height: 16),
-
+        DropdownButtonFormField<String>(
+          value: _selectedZone,
+          decoration: const InputDecoration(
+            labelText: 'Zona o Municipio Sede (Bodega)',
+            prefixIcon: Icon(Icons.location_city),
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+          items: _zonesSV
+              .map((z) => DropdownMenuItem(value: z, child: Text(z)))
+              .toList(),
+          onChanged: (val) {
+            setState(() {
+              _selectedZone = val ?? _selectedZone;
+              if (_selectedZone != 'Otro (especificar)') {
+                _updateMapSearch(_selectedZone);
+              }
+            });
+          },
+        ),
+        if (_selectedZone == 'Otro (especificar)') ...[
+          const SizedBox(height: 12),
+          TextField(
+            controller: _customZoneCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Ingresa tu municipio o zona',
+              hintText: 'Ej. Apopa, Sonsonate, Usulután...',
+              prefixIcon: Icon(Icons.edit_location_alt_outlined),
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+        ],
+        const SizedBox(height: 14),
+        TextField(
+          controller: _addressCtrl,
+          onSubmitted: _updateMapSearch,
+          decoration: InputDecoration(
+            labelText: 'Dirección Física / Bodega Principal',
+            hintText: 'Ej. Colonia Quezaltepec, Calle Principal #12',
+            prefixIcon: const Icon(Icons.storefront_outlined),
+            suffixIcon: IconButton(
+              tooltip: 'Ubicar en el mapa',
+              icon: const Icon(Icons.search, color: AppColors.primaryBlue),
+              onPressed: () => _updateMapSearch(_addressCtrl.text),
+            ),
+            border: const OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: const [
+                      Icon(Icons.location_on,
+                          color: AppColors.primaryBlue, size: 18),
+                      SizedBox(width: 6),
+                      Text(
+                        'Vista previa en Google Maps',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.navyDark,
+                        ),
+                      ),
+                    ],
+                  ),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: _captureCurrentGps,
+                    icon: Icon(
+                      _selectedLat != null
+                          ? Icons.gps_fixed
+                          : Icons.my_location,
+                      size: 15,
+                      color: _selectedLat != null
+                          ? const Color(0xFF16A34A)
+                          : AppColors.primaryBlue,
+                    ),
+                    label: Text(
+                      _selectedLat != null ? 'GPS Guardado ✓' : 'Fijar mi GPS',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: _selectedLat != null
+                            ? const Color(0xFF16A34A)
+                            : AppColors.primaryBlue,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  height: 190,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                  ),
+                  child: HtmlElementView(
+                    key: ValueKey(_currentMapQuery),
+                    viewType: _mapViewId,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
         TextField(
           controller: _coverageCtrl,
           decoration: const InputDecoration(
@@ -725,7 +951,6 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
           ),
         ),
         const SizedBox(height: 14),
-
         TextField(
           controller: _deliveryDaysCtrl,
           decoration: const InputDecoration(
@@ -737,7 +962,6 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
           ),
         ),
         const SizedBox(height: 14),
-
         TextField(
           controller: _minOrderCtrl,
           keyboardType: TextInputType.number,

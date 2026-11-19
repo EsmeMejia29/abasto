@@ -459,12 +459,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     return Scaffold(
+      backgroundColor: const Color(0xFFF1F5F9),
       appBar: AppBar(
-        title: const Text('Mi Perfil y Negocio'),
+        backgroundColor: const Color(0xFF001A2C),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: AppColors.tealMint.withOpacity(0.16),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.storefront_rounded,
+                  color: AppColors.tealMint, size: 19),
+            ),
+            const SizedBox(width: 10),
+            const Text(
+              'Mi Perfil y Negocio',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
             tooltip: 'Cerrar Sesión',
-            icon: const Icon(Icons.logout_rounded, color: Colors.red),
+            icon: const Icon(Icons.logout_rounded, color: Color(0xFFFCA5A5)),
             onPressed: _logout,
           ),
         ],

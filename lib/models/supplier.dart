@@ -50,6 +50,9 @@ class Supplier {
   final String businessHours;
   final bool isVerified;
   final String? description;
+  final String deliveryCoverage;
+  final double? latitude;
+  final double? longitude;
 
   const Supplier({
     required this.id,
@@ -68,9 +71,14 @@ class Supplier {
     this.businessHours = 'Lunes a Sábado: 7:00 AM - 5:00 PM',
     this.isVerified = true,
     this.description,
+    this.deliveryCoverage = '',
+    this.latitude,
+    this.longitude,
   });
 
   factory Supplier.fromMap(Map<String, dynamic> map) {
+    final latRaw = map['latitude'] ?? map['delivery_latitude'];
+    final lngRaw = map['longitude'] ?? map['delivery_longitude'];
     return Supplier(
       id: map['id']?.toString() ?? map['profile_id']?.toString() ?? '',
       name: map['business_name'] ?? map['name'] ?? 'Distribuidor',
@@ -88,6 +96,9 @@ class Supplier {
       businessHours: map['business_hours'] ?? 'Lunes a Sábado: 7:00 AM - 5:00 PM',
       isVerified: map['is_verified'] ?? true,
       description: map['description'] as String?,
+      deliveryCoverage: (map['delivery_coverage'] ?? '').toString(),
+      latitude: latRaw != null ? double.tryParse(latRaw.toString()) : null,
+      longitude: lngRaw != null ? double.tryParse(lngRaw.toString()) : null,
     );
   }
 }

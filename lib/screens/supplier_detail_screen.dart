@@ -999,9 +999,10 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                   CircleAvatar(
                     radius: 32,
                     backgroundColor: AppColors.primaryBlue.withOpacity(0.12),
-                    backgroundImage: (s.avatarUrl != null && s.avatarUrl!.isNotEmpty)
-                        ? NetworkImage(s.avatarUrl!)
-                        : null,
+                    backgroundImage:
+                        (s.avatarUrl != null && s.avatarUrl!.isNotEmpty)
+                            ? NetworkImage(s.avatarUrl!)
+                            : null,
                     child: (s.avatarUrl == null || s.avatarUrl!.isEmpty)
                         ? Text(
                             s.name.isNotEmpty ? s.name[0].toUpperCase() : 'D',
@@ -1032,34 +1033,47 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                             ),
                             if (s.isVerified) ...[
                               const SizedBox(width: 6),
-                              const Icon(Icons.check_circle,
+                              const Icon(Icons.verified_rounded,
                                   color: AppColors.tealMint, size: 18),
                             ],
                           ],
                         ),
-                        const SizedBox(height: 3),
-                        Text(
-                          s.category,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: AppColors.subtitleGrey,
-                            fontWeight: FontWeight.w500,
+                        const SizedBox(height: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.primaryBlue.withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            s.category,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppColors.primaryBlue,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 5),
                         Row(
                           children: [
-                            const Icon(Icons.star, color: Colors.amber, size: 16),
+                            const Icon(Icons.star_rounded,
+                                color: Color(0xFFF59E0B), size: 16),
                             const SizedBox(width: 4),
                             Text(
-                              '${s.rating.toStringAsFixed(1)} (${s.reviewsCount} reseñas verificadas)',
+                              s.reviewsCount > 0
+                                  ? '${s.rating.toStringAsFixed(1)} (${s.reviewsCount} reseñas verificadas)'
+                                  : '5.0 • Proveedor Verificado',
                               style: const TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
+                                color: AppColors.navyDark,
                               ),
                             ),
                             const SizedBox(width: 4),
-                            const Icon(Icons.chevron_right, size: 16, color: AppColors.subtitleGrey),
+                            const Icon(Icons.chevron_right,
+                                size: 16, color: AppColors.subtitleGrey),
                           ],
                         ),
                       ],
@@ -1077,14 +1091,37 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      s.location,
-                      style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                      'Sede: ${s.location.isNotEmpty ? '${s.location[0].toUpperCase()}${s.location.substring(1)}' : s.location}',
+                      style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF334155)),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 4),
+              if (s.deliveryCoverage.isNotEmpty) ...[
+                const SizedBox(height: 5),
+                Row(
+                  children: [
+                    const Icon(Icons.local_shipping_outlined,
+                        size: 15, color: Color(0xFF0F766E)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Reparte en: ${s.deliveryCoverage}',
+                        style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w500,
+                            color: Color(0xFF0F766E)),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 5),
               Row(
                 children: [
                   const Icon(Icons.schedule_outlined,
@@ -1092,7 +1129,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      s.businessHours,
+                      '${s.businessHours}${_minOrderAmount > 0 ? ' • Pedido mín: \$${_minOrderAmount.toStringAsFixed(2)}' : ''}',
                       style: const TextStyle(
                           fontSize: 12, color: AppColors.subtitleGrey),
                       overflow: TextOverflow.ellipsis,

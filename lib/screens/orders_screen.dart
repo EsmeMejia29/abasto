@@ -108,18 +108,18 @@ class _OrdersScreenState extends State<OrdersScreen> {
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
       case 'entregado':
-        return Colors.green;
+        return const Color(0xFF0F766E);
       case 'enruta':
       case 'en ruta':
-        return Colors.blue;
-      case 'confirmado':
-        return AppColors.tealMint;
-      case 'pendiente':
-        return Colors.orange;
-      case 'cancelado':
-        return Colors.red;
-      default:
         return AppColors.primaryBlue;
+      case 'confirmado':
+        return const Color(0xFF059669);
+      case 'pendiente':
+        return const Color(0xFFD97706);
+      case 'cancelado':
+        return const Color(0xFFDC2626);
+      default:
+        return AppColors.navyDark;
     }
   }
 
@@ -945,11 +945,23 @@ class _OrdersScreenState extends State<OrdersScreen> {
     final items = (order['order_items'] as List<dynamic>?) ?? [];
     final isPendiente = status.toLowerCase() == 'pendiente';
 
-    return Card(
-      elevation: 1.5,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: Colors.grey.shade200),
+    final statusColor = _getStatusColor(status);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: const Color(0xFFE2E8F0),
+          width: 1.0,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF001A2C).withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -959,41 +971,61 @@ class _OrdersScreenState extends State<OrdersScreen> {
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      code,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: AppColors.navyDark,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        const Icon(Icons.storefront,
-                            size: 14, color: AppColors.primaryBlue),
-                        const SizedBox(width: 4),
-                        Text(
-                          supplierName,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 13),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        code,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16.5,
+                          color: AppColors.navyDark,
                         ),
-                      ],
-                    ),
-                  ],
+                      ),
+                      const SizedBox(height: 3),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              color: AppColors.primaryBlue.withOpacity(0.08),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Icon(Icons.storefront_rounded,
+                                size: 13, color: AppColors.primaryBlue),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              supplierName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                                color: Color(0xFF334155),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
+                const SizedBox(width: 8),
                 InkWell(
+                  borderRadius: BorderRadius.circular(20),
                   onTap: () => _showTimelineDialog(order),
                   child: Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
-                      color: _getStatusColor(status).withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(8),
+                      color: statusColor.withOpacity(0.11),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: statusColor.withOpacity(0.3)),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -1001,68 +1033,104 @@ class _OrdersScreenState extends State<OrdersScreen> {
                         Text(
                           _formatStatus(status),
                           style: TextStyle(
-                            color: _getStatusColor(status),
+                            color: statusColor,
                             fontWeight: FontWeight.bold,
-                            fontSize: 12,
+                            fontSize: 11.5,
                           ),
                         ),
                         const SizedBox(width: 4),
-                        Icon(Icons.history,
-                            size: 14, color: _getStatusColor(status)),
+                        Icon(Icons.history_rounded,
+                            size: 14, color: statusColor),
                       ],
                     ),
                   ),
                 ),
               ],
             ),
-            const Divider(height: 14),
+            const SizedBox(height: 12),
 
-            // Insumos
-            ...items.take(3).map((it) {
-              final pName = it['product_name'] ?? 'Insumo';
-              final qty = it['quantity'] ?? 1;
-              final price = (it['unit_price'] as num?)?.toDouble() ?? 0.0;
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 1.5),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('$qty x $pName', style: const TextStyle(fontSize: 13)),
-                    Text('\$${(qty * price).toStringAsFixed(2)}',
+            // Caja de resumen de insumos y total
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ...items.take(3).map((it) {
+                    final pName = it['product_name'] ?? 'Insumo';
+                    final qty = it['quantity'] ?? 1;
+                    final price = (it['unit_price'] as num?)?.toDouble() ?? 0.0;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '$qty x $pName',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Color(0xFF334155),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '\$${(qty * price).toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.navyDark,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                  if (items.length > 3)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        '+ ${items.length - 3} insumos adicionales...',
                         style: const TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w500)),
-                  ],
-                ),
-              );
-            }),
-            if (items.length > 3)
-              Text('+ ${items.length - 3} insumos adicionales...',
-                  style: const TextStyle(
-                      fontSize: 11,
-                      fontStyle: FontStyle.italic,
-                      color: AppColors.subtitleGrey)),
-
-            const Divider(height: 14),
-
-            // Total único y transparente (sin tarifa duplicada)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Total a Pagar:',
-                    style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.navyDark)),
-                Text(
-                  '\$${totalFinal.toStringAsFixed(2)}',
-                  style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.navyDark),
-                ),
-              ],
+                          fontSize: 11,
+                          fontStyle: FontStyle.italic,
+                          color: AppColors.subtitleGrey,
+                        ),
+                      ),
+                    ),
+                  const Divider(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Total a Pagar:',
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.navyDark,
+                        ),
+                      ),
+                      Text(
+                        '\$${totalFinal.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontSize: 18.5,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.navyDark,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
 
             // Acciones para órdenes pendientes
             if (isPendiente) ...[
@@ -1071,44 +1139,73 @@ class _OrdersScreenState extends State<OrdersScreen> {
                   Expanded(
                     child: OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
-                          padding: EdgeInsets.zero),
+                        foregroundColor: AppColors.navyDark,
+                        side: const BorderSide(color: Color(0xFFCBD5E1)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(vertical: 9),
+                      ),
                       onPressed: () => _showEditOrderModal(order),
                       icon: const Icon(Icons.edit_outlined, size: 15),
                       label: const Text('Modificar',
-                          style: TextStyle(fontSize: 12)),
+                          style: TextStyle(
+                              fontSize: 12.5, fontWeight: FontWeight.w600)),
                     ),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.red,
-                        side: const BorderSide(color: Colors.redAccent),
-                        padding: EdgeInsets.zero,
+                        foregroundColor: const Color(0xFFDC2626),
+                        side: const BorderSide(color: Color(0xFFFCA5A5)),
+                        backgroundColor: const Color(0xFFFEF2F2),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(vertical: 9),
                       ),
                       onPressed: () => _confirmCancelOrder(order),
                       icon: const Icon(Icons.cancel_outlined, size: 15),
                       label: const Text('Cancelar',
-                          style: TextStyle(fontSize: 12)),
+                          style: TextStyle(
+                              fontSize: 12.5, fontWeight: FontWeight.w600)),
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 8),
-              SizedBox(
+              Container(
                 width: double.infinity,
-                height: 38,
+                height: 42,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF001A2C), Color(0xFF1B3452)],
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF001A2C).withOpacity(0.18),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF4F46E5),
+                    backgroundColor: Colors.transparent,
+                    shadowColor: Colors.transparent,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10)),
                   ),
-                  icon: const Icon(Icons.payment, size: 18),
+                  icon: const Icon(Icons.lock_outline_rounded,
+                      size: 17, color: AppColors.tealMint),
                   label: Text(
-                      'Pagar con Wompi (\$${totalFinal.toStringAsFixed(2)})',
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                    'Pagar con Wompi (\$${totalFinal.toStringAsFixed(2)})',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 13.5),
+                  ),
                   onPressed: () => _payOrderWithWompi(order),
                 ),
               ),
@@ -1120,16 +1217,30 @@ class _OrdersScreenState extends State<OrdersScreen> {
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.navyDark,
+                      side: const BorderSide(color: Color(0xFFCBD5E1)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
                     onPressed: () => _showTimelineDialog(order),
-                    icon: const Icon(Icons.access_time, size: 16),
-                    label: const Text('Trazabilidad'),
+                    icon: const Icon(Icons.access_time_rounded,
+                        size: 16, color: AppColors.primaryBlue),
+                    label: const Text('Trazabilidad',
+                        style: TextStyle(
+                            fontSize: 12.5, fontWeight: FontWeight.w600)),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primaryBlue),
+                      backgroundColor: const Color(0xFF1B3452),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
                     onPressed: () {
                       final orderObj = OrderModel(
                         id: order['id'].toString(),
@@ -1164,10 +1275,13 @@ class _OrdersScreenState extends State<OrdersScreen> {
                         ),
                       );
                     },
-                    icon: const Icon(Icons.chat_bubble_outline,
-                        color: Colors.white, size: 16),
+                    icon: const Icon(Icons.chat_bubble_outline_rounded,
+                        color: AppColors.tealMint, size: 16),
                     label: const Text('Chat',
-                        style: TextStyle(color: Colors.white)),
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.bold)),
                   ),
                 ),
               ],
@@ -1345,36 +1459,63 @@ class _OrdersScreenState extends State<OrdersScreen> {
         ),
       ),
     );
+  
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: const Color(0xFFF1F5F9),
       appBar: AppBar(
-        title: const Text('Seguimiento de Pedidos'),
-        actions: [
-          TextButton.icon(
-            onPressed: () {
-              final message = Uri.encodeComponent(
-                'Hola, equipo de Abasto, necesito ayuda con mis pedidos.',
-              );
-              html.window.open(
-                'https://wa.me/50360376012?text=$message',
-                '_blank',
-              );
-            },
-            icon: const Icon(
-              Icons.support_agent,
-              size: 18,
-              color: Color(0xFF16A34A),
+        backgroundColor: const Color(0xFF001A2C),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: AppColors.tealMint.withOpacity(0.16),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.receipt_long_rounded,
+                  color: AppColors.tealMint, size: 19),
             ),
-            label: const Text(
-              '¿Necesitas ayuda?',
-              style: TextStyle(
-                color: Color(0xFF16A34A),
-                fontWeight: FontWeight.bold,
-                fontSize: 13,
+            const SizedBox(width: 10),
+            const Text(
+              'Mis Pedidos',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+          ],
+        ),
+        actions: [
+          Container(
+            margin: const EdgeInsets.symmetric(vertical: 8),
+            child: TextButton.icon(
+              style: TextButton.styleFrom(
+                backgroundColor: Colors.white.withOpacity(0.10),
+                foregroundColor: AppColors.tealMint,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+              onPressed: () {
+                final message = Uri.encodeComponent(
+                  'Hola, equipo de Abasto, necesito ayuda con mis pedidos.',
+                );
+                html.window.open(
+                  'https://wa.me/50360376012?text=$message',
+                  '_blank',
+                );
+              },
+              icon: const Icon(Icons.support_agent_rounded, size: 17),
+              label: const Text(
+                'Ayuda',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12.5,
+                ),
               ),
             ),
           ),
@@ -1383,7 +1524,11 @@ class _OrdersScreenState extends State<OrdersScreen> {
             icon: const Icon(Icons.download_rounded),
             onPressed: _exportOrdersCsv,
           ),
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _refresh),
+          IconButton(
+            tooltip: 'Actualizar',
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: _refresh,
+          ),
         ],
       ),
       body: FutureBuilder<List<Map<String, dynamic>>>(
@@ -1434,7 +1579,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                         crossAxisCount: 2,
                         crossAxisSpacing: 18,
                         mainAxisSpacing: 18,
-                        mainAxisExtent: 495,
+                        mainAxisExtent: 515,
                       ),
                       itemCount: orders.length,
                       itemBuilder: (context, index) =>

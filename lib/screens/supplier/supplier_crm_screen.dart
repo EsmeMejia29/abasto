@@ -18,6 +18,7 @@ class SupplierCrmScreen extends StatefulWidget {
 class _SupplierCrmScreenState extends State<SupplierCrmScreen> {
   RealtimeChannel? _realtimeSubscription;
   SupplierTimePeriod _selectedPeriod = SupplierTimePeriod.thisMonth;
+  String _selectedClientZone = 'Todas';
   bool _isLoading = true;
 
   // KPIs actuales
@@ -204,17 +205,21 @@ class _SupplierCrmScreenState extends State<SupplierCrmScreen> {
           .toSet()
           .toList();
       final Map<String, String> clientNames = {};
+      final Map<String, String> clientLocations = {};
 
       if (allClientIds.isNotEmpty) {
         try {
           final profs = await supabase
               .from('profiles')
-              .select('id, business_name')
+              .select('id, business_name, address, location')
               .filter('id', 'in', allClientIds);
 
           for (var p in (profs as List<dynamic>)) {
-            clientNames[p['id'].toString()] =
+            final pid = p['id'].toString();
+            clientNames[pid] =
                 p['business_name']?.toString() ?? 'Restaurante';
+            clientLocations[pid] = (p['location'] ?? p['address'] ?? 'Sin zona')
+                .toString();
           }
         } catch (_) {}
       }
@@ -333,7 +338,9 @@ class _SupplierCrmScreenState extends State<SupplierCrmScreen> {
           _topClients = sortedClients
               .map((e) => {
                     'id': e.key,
-                    'name': clientNames[e.key] ?? 'Restaurante',
+                    'name':
+                        '${clientNames[e.key] ?? 'Restaurante'} (${clientLocations[e.key] ?? ''})',
+                    'zone': clientLocations[e.key] ?? '',
                     'orders_count': e.value['count'],
                     'amount': e.value['total'],
                   })
@@ -1031,12 +1038,108 @@ class _SupplierCrmScreenState extends State<SupplierCrmScreen> {
                                 itemIcon: Icons.inventory_2_outlined,
                               );
 
-                              final clientsWidget = _buildBarsSection(
-                                title: 'Top Restaurantes (Frecuencia y Monto)',
-                                items: _topClients,
-                                barColor: AppColors.tealMint,
-                                itemIcon: Icons.restaurant_outlined,
-                                isClient: true,
+                              final zoneAliases = <String, List<String>>{
+                                'Santa Tecla': [
+                                  'santa tecla',
+                                  'quezaltepec',
+                                  'merliot',
+                                  'delicias',
+                                  'alpes suizos',
+                                  'pinares',
+                                  'utila',
+                                  'santa teresa',
+                                ],
+                                'Antiguo Cuscatlán': [
+                                  'antiguo cuscatlan',
+                                  'santa elena',
+                                  'sultana',
+                                  'madreselva',
+                                  'laguna',
+                                  'cima',
+                                ],
+                                'San Salvador': [
+                                  'san salvador',
+                                  'escalon',
+                                  'san benito',
+                                  'miramonte',
+                                  'flor blanca',
+                                  'altamira',
+                                  'medica',
+                                ],
+                                'Soyapango': [
+                                  'soyapango',
+                                  'ilopango',
+                                  'venecia',
+                                  'sierra morena',
+                                ],
+                              };
+
+                              final filteredClients = _selectedClientZone ==
+                                      'Todas'
+                                  ? _topClients
+                                  : _topClients.where((c) {
+                                      final zText = (c['zone'] ?? '')
+                                          .toString()
+                                          .toLowerCase()
+                                          .replaceAll('á', 'a')
+                                          .replaceAll('é', 'e')
+                                          .replaceAll('í', 'i')
+                                          .replaceAll('ó', 'o')
+                                          .replaceAll('ú', 'u');
+                                      final keys =
+                                          zoneAliases[_selectedClientZone] ??
+                                              [
+                                                _selectedClientZone
+                                                    .toLowerCase()
+                                              ];
+                                      return keys.any((k) => zText.contains(k));
+                                    }).toList();
+
+                              final clientsWidget = Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  SingleChildScrollView(
+                                    scrollDirection: Axis.horizontal,
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: Row(
+                                      children: [
+                                        'Todas',
+                                        'Santa Tecla',
+                                        'Antiguo Cuscatlán',
+                                        'San Salvador',
+                                        'Soyapango',
+                                      ].map((z) {
+                                        final sel = _selectedClientZone == z;
+                                        return Padding(
+                                          padding:
+                                              const EdgeInsets.only(right: 6),
+                                          child: ChoiceChip(
+                                            label: Text(z,
+                                                style: const TextStyle(
+                                                    fontSize: 11.5)),
+                                            selected: sel,
+                                            selectedColor: AppColors.navyDark,
+                                            labelStyle: TextStyle(
+                                              color: sel
+                                                  ? Colors.white
+                                                  : AppColors.navyDark,
+                                            ),
+                                            onSelected: (_) => setState(
+                                                () => _selectedClientZone = z),
+                                          ),
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ),
+                                  _buildBarsSection(
+                                    title:
+                                        'Top Restaurantes (Frecuencia y Monto)',
+                                    items: filteredClients,
+                                    barColor: AppColors.tealMint,
+                                    itemIcon: Icons.restaurant_outlined,
+                                    isClient: true,
+                                  ),
+                                ],
                               );
 
                               if (isDesktop) {

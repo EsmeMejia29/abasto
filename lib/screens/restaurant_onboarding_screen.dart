@@ -69,10 +69,12 @@ class _RestaurantOnboardingScreenState
   final _deliveryInstructionsCtrl = TextEditingController(
       text: 'Entrada de proveedores por portón lateral de servicio');
 
-  // Buscador y Mapa de Google embebido
+  // Buscador, Coordenadas GPS y Mapa de Google embebido
   final _searchLocationCtrl =
       TextEditingController(text: 'Mauritas, Paseo el Carmen, Santa Tecla');
   String _currentMapQuery = 'Mauritas, Paseo el Carmen, Santa Tecla, El Salvador';
+  double? _selectedLat;
+  double? _selectedLng;
   final String _viewId =
       'google-maps-onboarding-${DateTime.now().millisecondsSinceEpoch}';
 
@@ -202,6 +204,42 @@ class _RestaurantOnboardingScreenState
     }
   }
 
+  Future<void> _captureCurrentGps() async {
+    try {
+      final pos = await html.window.navigator.geolocation.getCurrentPosition();
+      final lat = pos.coords?.latitude?.toDouble();
+      final lng = pos.coords?.longitude?.toDouble();
+      if (lat != null && lng != null && mounted) {
+        setState(() {
+          _selectedLat = lat;
+          _selectedLng = lng;
+          _currentMapQuery = '$lat,$lng';
+        });
+        final element =
+            html.document.getElementById(_viewId) as html.IFrameElement?;
+        if (element != null) {
+          element.src =
+              'https://maps.google.com/maps?q=$lat,$lng&t=&z=16&ie=UTF8&iwloc=&output=embed';
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Coordenadas GPS capturadas para entregas exactas.'),
+            backgroundColor: AppColors.tealMint,
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'No se pudo obtener GPS automático; se usará la zona seleccionada.'),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   void dispose() {
     _businessNameCtrl.dispose();
@@ -286,6 +324,8 @@ class _RestaurantOnboardingScreenState
         'restaurant_address': _restaurantAddressCtrl.text.trim(),
         'delivery_address': finalDeliveryAddress,
         'delivery_instructions': _deliveryInstructionsCtrl.text.trim(),
+        if (_selectedLat != null) 'delivery_latitude': _selectedLat,
+        if (_selectedLng != null) 'delivery_longitude': _selectedLng,
         'onboarding_completed': true,
       });
 
@@ -632,11 +672,6 @@ class _RestaurantOnboardingScreenState
               border: OutlineInputBorder(),
               isDense: true,
             ),
-            onChanged: (val) {
-              if (val.trim().length > 3) {
-                _updateMapSearch(val);
-              }
-            },
           ),
         ],
 
@@ -710,15 +745,43 @@ class _RestaurantOnboardingScreenState
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                children: const [
-                  Icon(Icons.location_on, color: AppColors.primaryBlue, size: 20),
-                  SizedBox(width: 8),
-                  Text(
-                    'Ubicación en Google Maps',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.navyDark,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: const [
+                      Icon(Icons.location_on,
+                          color: AppColors.primaryBlue, size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        'Ubicación en Google Maps',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.navyDark,
+                        ),
+                      ),
+                    ],
+                  ),
+                  TextButton.icon(
+                    onPressed: _captureCurrentGps,
+                    icon: Icon(
+                      _selectedLat != null
+                          ? Icons.gps_fixed
+                          : Icons.my_location,
+                      size: 16,
+                      color: _selectedLat != null
+                          ? const Color(0xFF16A34A)
+                          : AppColors.primaryBlue,
+                    ),
+                    label: Text(
+                      _selectedLat != null ? 'GPS Guardado ✓' : 'Fijar mi GPS',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: _selectedLat != null
+                            ? const Color(0xFF16A34A)
+                            : AppColors.primaryBlue,
+                      ),
                     ),
                   ),
                 ],
