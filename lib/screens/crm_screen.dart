@@ -36,6 +36,7 @@ class _CrmScreenState extends State<CrmScreen> {
   List<dynamic> _categorySpend = [];
   List<dynamic> _timelineBars = [];
   List<dynamic> _reorderAlerts = [];
+  List<dynamic> _priceVariations = [];
 
   String get _currentUserId =>
       supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
@@ -290,6 +291,53 @@ class _CrmScreenState extends State<CrmScreen> {
         o['supplier_name'] = supplierNames[sId] ?? 'Distribuidor';
       }
 
+      // Calcular variación de precio unitario promedio vs período anterior
+      final Map<String, List<double>> currPricesByProd = {};
+      final Map<String, List<double>> prevPricesByProd = {};
+
+      for (final o in currentOrders) {
+        for (final it in ((o['order_items'] as List<dynamic>?) ?? [])) {
+          final pName = (it['product_name'] ?? '').toString().trim();
+          final uPrice = (it['unit_price'] as num?)?.toDouble() ?? 0.0;
+          if (pName.isNotEmpty && uPrice > 0) {
+            currPricesByProd.putIfAbsent(pName, () => []).add(uPrice);
+          }
+        }
+      }
+
+      for (final o in prevOrders) {
+        for (final it in ((o['order_items'] as List<dynamic>?) ?? [])) {
+          final pName = (it['product_name'] ?? '').toString().trim();
+          final uPrice = (it['unit_price'] as num?)?.toDouble() ?? 0.0;
+          if (pName.isNotEmpty && uPrice > 0) {
+            prevPricesByProd.putIfAbsent(pName, () => []).add(uPrice);
+          }
+        }
+      }
+
+      final List<dynamic> variations = [];
+      currPricesByProd.forEach((pName, currList) {
+        final prevList = prevPricesByProd[pName];
+        if (prevList != null && prevList.isNotEmpty) {
+          final currAvg = currList.reduce((a, b) => a + b) / currList.length;
+          final prevAvg = prevList.reduce((a, b) => a + b) / prevList.length;
+          if (prevAvg > 0) {
+            final diffPct = ((currAvg - prevAvg) / prevAvg) * 100;
+            if (diffPct.abs() >= 1.0) {
+              variations.add({
+                'name': pName,
+                'currPrice': currAvg,
+                'prevPrice': prevAvg,
+                'diffPct': diffPct,
+              });
+            }
+          }
+        }
+      });
+      variations.sort((a, b) => (b['diffPct'] as double)
+          .abs()
+          .compareTo((a['diffPct'] as double).abs()));
+
       if (mounted) {
         setState(() {
           _rawOrders = currentOrders;
@@ -332,6 +380,7 @@ class _CrmScreenState extends State<CrmScreen> {
               .toList();
 
           _reorderAlerts = alerts;
+          _priceVariations = variations;
           _isLoading = false;
         });
       }
@@ -731,6 +780,112 @@ class _CrmScreenState extends State<CrmScreen> {
     );
   }
 
+  Widget _buildPriceVariationsSection() {
+    if (_priceVariations.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 20),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.navyDark.withOpacity(0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: AppColors.primaryBlue.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.trending_up_rounded,
+                  color: AppColors.primaryBlue,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Text(
+                'Variación de Costos por Insumo (vs. período anterior)',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.navyDark,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ..._priceVariations.take(4).map((v) {
+            final double pct = v['diffPct'];
+            final bool isUp = pct > 0;
+            final double prevP = v['prevPrice'];
+            final double currP = v['currPrice'];
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: isUp
+                          ? const Color(0xFFFEF2F2)
+                          : const Color(0xFFECFDF5),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      '${isUp ? '▲ +' : '▼ '}${pct.toStringAsFixed(1)}%',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.bold,
+                        color: isUp
+                            ? const Color(0xFFDC2626)
+                            : const Color(0xFF047857),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      v['name'].toString(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.navyDark,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '\$${prevP.toStringAsFixed(2)} → \$${currP.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.subtitleGrey,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+  
   Widget _buildBarsSection({
     required String title,
     required List<dynamic> items,
@@ -940,6 +1095,7 @@ class _CrmScreenState extends State<CrmScreen> {
                           ),
                           const SizedBox(height: 20),
                           _buildReorderAlertsSection(),
+                          _buildPriceVariationsSection(),
                           LayoutBuilder(
                             builder: (context, constraints) {
                               final isDesktop = constraints.maxWidth >= 750;

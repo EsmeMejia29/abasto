@@ -104,6 +104,108 @@ class _SupplierIncomingOrdersScreenState
         .subscribe();
   }
 
+  Future<void> _showDriverAccessCodeDialog() async {
+    String code = '';
+    try {
+      final prof = await supabase
+          .from('profiles')
+          .select('driver_access_code')
+          .eq('id', _currentUserId)
+          .maybeSingle();
+      code = (prof?['driver_access_code'] ?? '').toString().trim();
+      if (code.isEmpty) {
+        code =
+            'RUTA-${(10000 + (DateTime.now().millisecondsSinceEpoch % 89999))}';
+        await supabase
+            .from('profiles')
+            .update({'driver_access_code': code}).eq('id', _currentUserId);
+      }
+    } catch (_) {}
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: const [
+            Icon(Icons.local_shipping_rounded, color: AppColors.primaryBlue),
+            SizedBox(width: 8),
+            Text('Acceso Rápido Motoristas',
+                style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Comparte este código con tus repartidores. Podrán entrar desde la pantalla principal en "Acceso Motorista / Repartidor" para ver direcciones GPS, avisar llegada, tomar foto de entrega y validar PIN (sin ver montos ni ganancias):',
+              style: TextStyle(fontSize: 12.5, height: 1.4),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF001A2C),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    code,
+                    style: const TextStyle(
+                      color: AppColors.tealMint,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Copiar código',
+                    icon: const Icon(Icons.copy_rounded, color: Colors.white),
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: code));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Código de motorista copiado'),
+                          backgroundColor: AppColors.tealMint,
+                          duration: Duration(seconds: 1),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              final newCode =
+                  'RUTA-${(10000 + (DateTime.now().millisecondsSinceEpoch % 89999))}';
+              await supabase
+                  .from('profiles')
+                  .update({'driver_access_code': newCode}).eq(
+                      'id', _currentUserId);
+              if (ctx.mounted) Navigator.pop(ctx);
+              _showDriverAccessCodeDialog();
+            },
+            child: const Text('Generar Nuevo Código'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.navyDark),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Listo', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _ordersSubscription?.unsubscribe();
@@ -353,6 +455,79 @@ class _SupplierIncomingOrdersScreenState
       return;
     }
 
+    // Si va a marcar como 'entregado' y la orden tiene PIN de recepción, validarlo
+    final expectedPin = (order['delivery_pin'] ?? '').toString().trim();
+    if (newStatus.toLowerCase() == 'entregado' && expectedPin.isNotEmpty) {
+      final pinCtrl = TextEditingController();
+      final verified = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text(
+            'Validar PIN de Entrega',
+            style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.bold),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Solicita el código de 4 dígitos al personal de ${order['restaurant_name']} para confirmar recepción conforme:',
+                style: const TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: pinCtrl,
+                keyboardType: TextInputType.number,
+                maxLength: 4,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 6,
+                ),
+                decoration: const InputDecoration(
+                  hintText: '0000',
+                  counterText: '',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF001A2C)),
+              onPressed: () {
+                if (pinCtrl.text.trim() == expectedPin) {
+                  Navigator.pop(ctx, true);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                          'PIN incorrecto. Verifica los 4 dígitos con el restaurante.'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
+              child: const Text(
+                'Confirmar Entrega',
+                style: TextStyle(
+                    color: AppColors.tealMint, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+      );
+      if (verified != true) return;
+    }
+
     try {
       final orderId = order['id'].toString();
       final currentHistory =
@@ -482,41 +657,79 @@ class _SupplierIncomingOrdersScreenState
           const SizedBox(height: 12),
           Divider(color: Colors.white.withOpacity(0.15), height: 1),
           const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               const Text(
                 'Retención Abasto por pedido: 5%',
                 style: TextStyle(color: Color(0xFFCBD5E1), fontSize: 11.5),
               ),
-              InkWell(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const SupplierBankSettingsScreen(),
-                    ),
-                  ).then((_) => _refresh());
-                },
-                borderRadius: BorderRadius.circular(6),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  child: Row(
-                    children: const [
-                      Icon(Icons.account_balance_outlined,
-                          color: AppColors.tealMint, size: 14),
-                      SizedBox(width: 5),
-                      Text(
-                        'Configurar Cuenta Bancaria',
-                        style: TextStyle(
-                          color: AppColors.tealMint,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  InkWell(
+                    onTap: _showDriverAccessCodeDialog,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.10),
+                        borderRadius: BorderRadius.circular(6),
                       ),
-                    ],
+                      child: Row(
+                        children: const [
+                          Icon(Icons.badge_outlined,
+                              color: AppColors.tealMint, size: 14),
+                          SizedBox(width: 5),
+                          Text(
+                            'Código Motorista',
+                            style: TextStyle(
+                              color: AppColors.tealMint,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 10),
+                  InkWell(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              const SupplierBankSettingsScreen(),
+                        ),
+                      ).then((_) => _refresh());
+                    },
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 2),
+                      child: Row(
+                        children: const [
+                          Icon(Icons.account_balance_outlined,
+                              color: AppColors.tealMint, size: 14),
+                          SizedBox(width: 5),
+                          Text(
+                            'Configurar Cuenta Bancaria',
+                            style: TextStyle(
+                              color: AppColors.tealMint,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -2454,6 +2667,11 @@ class _SupplierIncomingOrdersScreenState
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Código de Acceso para Motoristas',
+            icon: const Icon(Icons.badge_outlined, color: AppColors.tealMint),
+            onPressed: _showDriverAccessCodeDialog,
+          ),
           Container(
             margin: const EdgeInsets.symmetric(vertical: 8),
             child: TextButton.icon(

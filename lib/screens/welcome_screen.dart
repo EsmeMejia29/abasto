@@ -6,6 +6,7 @@ import '../theme/app_theme.dart';
 import '../utils/error_handler.dart';
 import 'admin/admin_settlements_screen.dart';
 import 'auth_screen.dart';
+import 'driver_delivery_screen.dart';
 
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
@@ -138,6 +139,117 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     );
   }
 
+  void _showDriverAccessDialog() {
+    final codeCtrl = TextEditingController();
+    bool isChecking = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: const [
+              Icon(Icons.local_shipping_rounded, color: AppColors.primaryBlue),
+              SizedBox(width: 8),
+              Text('Acceso Motorista / Reparto',
+                  style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Ingresa el código de ruta proporcionado por tu distribuidora:',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: codeCtrl,
+                textCapitalization: TextCapitalization.characters,
+                decoration: InputDecoration(
+                  labelText: 'Código de Ruta',
+                  hintText: 'Ej. RUTA-48291',
+                  prefixIcon: const Icon(Icons.qr_code_rounded),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: isChecking ? null : () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF001A2C)),
+              onPressed: isChecking
+                  ? null
+                  : () async {
+                      final code = codeCtrl.text.trim().toUpperCase();
+                      if (code.isEmpty) return;
+                      setDialogState(() => isChecking = true);
+                      try {
+                        final prof = await supabase
+                            .from('profiles')
+                            .select('id, business_name')
+                            .eq('role', 'supplier')
+                            .ilike('driver_access_code', code)
+                            .maybeSingle();
+
+                        if (prof != null && mounted) {
+                          Navigator.pop(ctx);
+                          Navigator.pushAndRemoveUntil(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => DriverDeliveryScreen(
+                                supplierId: prof['id'].toString(),
+                                supplierName: (prof['business_name'] ??
+                                        'Distribuidora')
+                                    .toString(),
+                                accessCode: code,
+                              ),
+                            ),
+                            (route) => false,
+                          );
+                        } else if (mounted) {
+                          setDialogState(() => isChecking = false);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                  'Código de ruta no válido. Pídelo a tu distribuidor.'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        setDialogState(() => isChecking = false);
+                      }
+                    },
+              child: isChecking
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Text(
+                      'Entrar a Ruta',
+                      style: TextStyle(
+                          color: AppColors.tealMint,
+                          fontWeight: FontWeight.bold),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -258,6 +370,20 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   ),
 
                   const SizedBox(height: 12),
+
+                  // Acceso rápido para Motorista / Repartidor
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppColors.primaryBlue,
+                    ),
+                    onPressed: _showDriverAccessDialog,
+                    icon: const Icon(Icons.local_shipping_outlined, size: 17),
+                    label: const Text(
+                      'Acceso Motorista / Repartidor',
+                      style: TextStyle(
+                          fontSize: 12.5, fontWeight: FontWeight.bold),
+                    ),
+                  ),
 
                   // Acceso rápido para Administrador
                   TextButton.icon(

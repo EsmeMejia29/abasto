@@ -274,6 +274,7 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
         'unit': TextEditingController(text: 'Caja 50 lb'),
         'price': TextEditingController(),
         'image_url': TextEditingController(),
+        'bulk_tiers': <dynamic>[],
         'isUploading': false,
       });
     });
@@ -287,6 +288,10 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
         (row['unit'] as TextEditingController).dispose();
         (row['price'] as TextEditingController).dispose();
         (row['image_url'] as TextEditingController).dispose();
+        for (final t in (row['bulk_tiers'] as List<dynamic>? ?? [])) {
+          (t['min_qty'] as TextEditingController).dispose();
+          (t['price'] as TextEditingController).dispose();
+        }
       });
     }
   }
@@ -453,12 +458,32 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
               (row['image_url'] as TextEditingController).text.trim();
 
           if (name.isNotEmpty) {
+            final rawTiers = (row['bulk_tiers'] as List<dynamic>?) ?? [];
+            final List<dynamic> parsedTiers = [];
+            for (final tc in rawTiers) {
+              final minQ = int.tryParse(
+                      (tc['min_qty'] as TextEditingController).text.trim()) ??
+                  0;
+              final tierP = double.tryParse((tc['price'] as TextEditingController)
+                      .text
+                      .replaceAll(r'$', '')
+                      .replaceAll(',', '.')
+                      .trim()) ??
+                  0.0;
+              if (minQ > 1 && tierP > 0) {
+                parsedTiers.add({'min_qty': minQ, 'price': tierP});
+              }
+            }
+            parsedTiers.sort(
+                (a, b) => (a['min_qty'] as int).compareTo(b['min_qty'] as int));
+
             productsToInsert.add({
               'supplier_id': userId,
               'category': cat,
               'name': name,
               'unit': unit.isEmpty ? 'unidad' : unit,
               'price': price,
+              'bulk_tiers': parsedTiers,
               'image_url': imgUrl.isNotEmpty ? imgUrl : null,
               'is_available': true,
             });
@@ -1300,6 +1325,96 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
                         ),
                       ],
                     ),
+                    const Divider(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Precios Escalonados por Volumen (Opcional)',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.navyDark,
+                          ),
+                        ),
+                        TextButton.icon(
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              (row['bulk_tiers'] as List<dynamic>).add({
+                                'min_qty': TextEditingController(),
+                                'price': TextEditingController(),
+                              });
+                            });
+                          },
+                          icon: const Icon(Icons.add_circle_outline, size: 15),
+                          label: const Text('Agregar escala',
+                              style: TextStyle(fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                    ...((row['bulk_tiers'] as List<dynamic>?) ?? [])
+                        .asMap()
+                        .entries
+                        .map((tierEntry) {
+                      final tIdx = tierEntry.key;
+                      final tc = tierEntry.value;
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller:
+                                    tc['min_qty'] as TextEditingController,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: 'Desde (cant.)',
+                                  hintText: 'Ej. 5',
+                                  isDense: true,
+                                  border: OutlineInputBorder(),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextField(
+                                controller:
+                                    tc['price'] as TextEditingController,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                        decimal: true),
+                                decoration: const InputDecoration(
+                                  labelText: 'Precio c/u (\$)',
+                                  hintText: 'Ej. 9.50',
+                                  isDense: true,
+                                  border: OutlineInputBorder(),
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline,
+                                  color: Colors.redAccent, size: 20),
+                              onPressed: () {
+                                setState(() {
+                                  final removed =
+                                      (row['bulk_tiers'] as List<dynamic>)
+                                          .removeAt(tIdx);
+                                  (removed['min_qty'] as TextEditingController)
+                                      .dispose();
+                                  (removed['price'] as TextEditingController)
+                                      .dispose();
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
                   ],
                 ),
               ),

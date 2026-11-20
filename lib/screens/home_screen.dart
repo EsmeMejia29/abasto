@@ -520,6 +520,27 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       TextButton.icon(
                         style: TextButton.styleFrom(
+                          backgroundColor: AppColors.tealMint,
+                          foregroundColor: const Color(0xFF001A2C),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                        ),
+                        onPressed: _showPriceComparatorModal,
+                        icon: const Icon(Icons.compare_arrows_rounded, size: 17),
+                        label: const Text(
+                          'Comparar Precios',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      TextButton.icon(
+                        style: TextButton.styleFrom(
                           backgroundColor: Colors.white.withOpacity(0.10),
                           foregroundColor: AppColors.tealMint,
                           padding: const EdgeInsets.symmetric(
@@ -864,6 +885,370 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ],
                   ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+  
+  void _showPriceComparatorModal() {
+    final compSearchCtrl = TextEditingController();
+    List<dynamic> results = [];
+    bool isSearching = false;
+    bool hasSearched = false;
+
+    Future<void> runSearch(String query, StateSetter setModalState) async {
+      final clean = query.trim();
+      if (clean.length < 2) return;
+      setModalState(() {
+        isSearching = true;
+        hasSearched = true;
+      });
+      try {
+        final res = await supabase
+            .from('products')
+            .select('id, name, price, unit, category, bulk_tiers, supplier_id')
+            .eq('is_available', true)
+            .ilike('name', '%$clean%')
+            .order('price', ascending: true)
+            .limit(30);
+
+        final suppMap = {for (final s in _allSuppliers) s.id: s};
+        final List<dynamic> enriched = [];
+
+        for (final row in (res as List<dynamic>)) {
+          final sId = row['supplier_id']?.toString() ?? '';
+          final supp = suppMap[sId];
+          if (supp == null) continue;
+          final basePrice = (row['price'] as num?)?.toDouble() ?? 0.0;
+          final finalPrice = double.parse((basePrice * 1.03).toStringAsFixed(2));
+          enriched.add({
+            'product_id': row['id'],
+            'product_name': row['name'] ?? 'Insumo',
+            'unit': row['unit'] ?? 'unidad',
+            'final_price': finalPrice,
+            'bulk_tiers': row['bulk_tiers'] ?? [],
+            'supplier': supp,
+          });
+        }
+
+        enriched.sort((a, b) =>
+            (a['final_price'] as double).compareTo(b['final_price'] as double));
+
+        setModalState(() {
+          results = enriched;
+          isSearching = false;
+        });
+      } catch (_) {
+        setModalState(() => isSearching = false);
+      }
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) => DraggableScrollableSheet(
+          initialChildSize: 0.82,
+          minChildSize: 0.5,
+          maxChildSize: 0.95,
+          expand: false,
+          builder: (_, scrollCtrl) => Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppColors.tealMint.withOpacity(0.18),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.compare_arrows_rounded,
+                              color: Color(0xFF0F766E), size: 22),
+                        ),
+                        const SizedBox(width: 10),
+                        const Text(
+                          'Comparador de Precios B2B',
+                          style: TextStyle(
+                            fontSize: 17.5,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.navyDark,
+                          ),
+                        ),
+                      ],
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Busca un insumo y compara al instante qué distribuidores lo tienen más económico.',
+                  style:
+                      TextStyle(fontSize: 12.5, color: AppColors.subtitleGrey),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: compSearchCtrl,
+                  autofocus: true,
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (val) => runSearch(val, setModalState),
+                  onChanged: (val) {
+                    if (val.trim().length >= 3) {
+                      runSearch(val, setModalState);
+                    }
+                  },
+                  decoration: InputDecoration(
+                    hintText: 'Ej. Tomate, Queso duro, Harina, Aceite...',
+                    prefixIcon: const Icon(Icons.search_rounded),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.arrow_forward_rounded,
+                          color: AppColors.primaryBlue),
+                      onPressed: () =>
+                          runSearch(compSearchCtrl.text, setModalState),
+                    ),
+                    filled: true,
+                    fillColor: const Color(0xFFF1F5F9),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Expanded(
+                  child: isSearching
+                      ? const Center(child: CircularProgressIndicator())
+                      : !hasSearched
+                          ? Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.price_check_rounded,
+                                      size: 48, color: Colors.grey.shade400),
+                                  const SizedBox(height: 8),
+                                  const Text(
+                                    'Escribe el nombre del insumo para comparar precios.',
+                                    style: TextStyle(
+                                        color: AppColors.subtitleGrey,
+                                        fontSize: 13),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : results.isEmpty
+                              ? const Center(
+                                  child: Text(
+                                    'No se encontraron insumos activos con ese nombre.',
+                                    style: TextStyle(
+                                        color: AppColors.subtitleGrey),
+                                  ),
+                                )
+                              : ListView.separated(
+                                  controller: scrollCtrl,
+                                  itemCount: results.length,
+                                  separatorBuilder: (_, __) =>
+                                      const SizedBox(height: 10),
+                                  itemBuilder: (_, idx) {
+                                    final item = results[idx];
+                                    final Supplier supp = item['supplier'];
+                                    final double finalPrice =
+                                        item['final_price'];
+                                    final tiers =
+                                        (item['bulk_tiers'] as List<dynamic>?) ??
+                                            [];
+                                    final isBest = idx == 0;
+
+                                    return Container(
+                                      padding: const EdgeInsets.all(14),
+                                      decoration: BoxDecoration(
+                                        color: isBest
+                                            ? const Color(0xFFF0FDF4)
+                                            : Colors.white,
+                                        borderRadius: BorderRadius.circular(14),
+                                        border: Border.all(
+                                          color: isBest
+                                              ? const Color(0xFF86EFAC)
+                                              : const Color(0xFFE2E8F0),
+                                        ),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                if (isBest)
+                                                  Container(
+                                                    margin:
+                                                        const EdgeInsets.only(
+                                                            bottom: 4),
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                        horizontal: 7,
+                                                        vertical: 2),
+                                                    decoration: BoxDecoration(
+                                                      color: const Color(
+                                                          0xFF16A34A),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              6),
+                                                    ),
+                                                    child: const Text(
+                                                      'MEJOR PRECIO',
+                                                      style: TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 9.5,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                Text(
+                                                  '${item['product_name']} (${item['unit']})',
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 14,
+                                                    color: AppColors.navyDark,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 3),
+                                                Row(
+                                                  children: [
+                                                    Flexible(
+                                                      child: Text(
+                                                        supp.name,
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                        style: const TextStyle(
+                                                          fontSize: 12.5,
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                          color: AppColors
+                                                              .primaryBlue,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    if (supp.isVerified) ...[
+                                                      const SizedBox(width: 4),
+                                                      const Icon(Icons.verified,
+                                                          size: 14,
+                                                          color: AppColors
+                                                              .tealMint),
+                                                    ],
+                                                    const SizedBox(width: 6),
+                                                    Text(
+                                                      '★ ${supp.rating.toStringAsFixed(1)}',
+                                                      style: const TextStyle(
+                                                        fontSize: 11.5,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                        color:
+                                                            Color(0xFFB45309),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                if (tiers.isNotEmpty) ...[
+                                                  const SizedBox(height: 3),
+                                                  Text(
+                                                    'Mayoreo desde ${tiers.first['min_qty']} unid. a \$${(((tiers.first['price'] as num).toDouble()) * 1.03).toStringAsFixed(2)} c/u',
+                                                    style: const TextStyle(
+                                                      fontSize: 11,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      color: Color(0xFF0F766E),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ],
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.end,
+                                            children: [
+                                              Text(
+                                                '\$${finalPrice.toStringAsFixed(2)}',
+                                                style: const TextStyle(
+                                                  fontSize: 18,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: AppColors.navyDark,
+                                                ),
+                                              ),
+                                              const Text(
+                                                'Tarifa incl.',
+                                                style: TextStyle(
+                                                    fontSize: 10,
+                                                    color:
+                                                        AppColors.subtitleGrey),
+                                              ),
+                                              const SizedBox(height: 6),
+                                              ElevatedButton(
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor:
+                                                      const Color(0xFF001A2C),
+                                                  foregroundColor: Colors.white,
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 6),
+                                                  minimumSize: Size.zero,
+                                                  tapTargetSize:
+                                                      MaterialTapTargetSize
+                                                          .shrinkWrap,
+                                                  shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            8),
+                                                  ),
+                                                ),
+                                                onPressed: () {
+                                                  Navigator.pop(ctx);
+                                                  Navigator.push(
+                                                    context,
+                                                    MaterialPageRoute(
+                                                      builder: (_) =>
+                                                          SupplierDetailScreen(
+                                                        supplier: supp,
+                                                      ),
+                                                    ),
+                                                  );
+                                                },
+                                                child: const Text(
+                                                  'Ir a tienda',
+                                                  style: TextStyle(
+                                                    fontSize: 11.5,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: AppColors.tealMint,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                ),
                 ),
               ],
             ),

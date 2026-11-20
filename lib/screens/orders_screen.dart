@@ -213,22 +213,38 @@ class _OrdersScreenState extends State<OrdersScreen> {
       if (isClosing) return;
       isClosing = true;
 
-      try {
-        final currentHistory =
-            (order['status_history'] as List<dynamic>?) ?? [];
-        final newHistory = List<dynamic>.from(currentHistory)
-          ..add({
-            'status': 'confirmado',
-            'changed_at': DateTime.now().toUtc().toIso8601String(),
-            'note':
-                'Pago aprobado por Wompi (Ref: $txRef • \$${totalToPay.toStringAsFixed(2)})',
-          });
+      final currentHistory =
+          (order['status_history'] as List<dynamic>?) ?? [];
+      final newHistory = List<dynamic>.from(currentHistory)
+        ..add({
+          'status': 'confirmado',
+          'changed_at': DateTime.now().toUtc().toIso8601String(),
+          'note':
+              'Pago aprobado por Wompi (Ref: $txRef • \$${totalToPay.toStringAsFixed(2)})',
+        });
 
+      try {
         await supabase.from('orders').update({
           'status': 'confirmado',
+          'payment_reference': txRef,
           'status_history': newHistory,
         }).eq('id', orderId);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error pasando orden a confirmado: $e');
+      }
+
+      try {
+        final existingPin = (order['delivery_pin'] ?? '').toString().trim();
+        final generatedPin = existingPin.length == 4
+            ? existingPin
+            : (1000 + (DateTime.now().millisecondsSinceEpoch % 9000))
+                .toString();
+        await supabase
+            .from('orders')
+            .update({'delivery_pin': generatedPin}).eq('id', orderId);
+      } catch (e) {
+        debugPrint('Aviso guardando delivery_pin: $e');
+      }
 
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
@@ -1097,7 +1113,58 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
+
+            if (['confirmado', 'enruta', 'en ruta'].contains(status.toLowerCase()) &&
+                (order['delivery_pin'] ?? '').toString().trim().isNotEmpty) ...[
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF001A2C),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: const [
+                        Icon(Icons.pin_outlined,
+                            color: AppColors.tealMint, size: 18),
+                        SizedBox(width: 8),
+                        Text(
+                          'PIN de Recepción (dictar al motorista):',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.tealMint,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        order['delivery_pin'].toString(),
+                        style: const TextStyle(
+                          color: Color(0xFF001A2C),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          letterSpacing: 2,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
 
             // Caja de resumen de insumos y total
             Container(

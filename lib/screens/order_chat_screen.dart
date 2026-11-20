@@ -12,17 +12,21 @@ import '../config/session_manager.dart';
 import 'dart:typed_data';
 
 class OrderChatScreen extends StatefulWidget {
-  final OrderModel? order;
+  final OrderModel order;
+  final String? otherPartyName;
   final String? orderId;
   final String? orderCode;
-  final String? otherPartyName;
+  final String? overrideSenderId;
+  final String? overrideSenderName;
 
   const OrderChatScreen({
     super.key,
-    this.order,
+    required this.order,
+    this.otherPartyName,
     this.orderId,
     this.orderCode,
-    this.otherPartyName,
+    this.overrideSenderId,
+    this.overrideSenderName,
   });
 
   @override
@@ -50,7 +54,9 @@ class _OrderChatScreenState extends State<OrderChatScreen> {
   final Set<String> _registeredMapViews = {};
 
   String get _currentUserId =>
-      supabase.auth.currentUser?.id ?? SessionManager.currentUserId;
+      widget.overrideSenderId ??
+      supabase.auth.currentUser?.id ??
+      SessionManager.currentUserId;
 
   final List<String> _restaurantQuickReplies = [
     '¿A qué hora estiman llegar?',
