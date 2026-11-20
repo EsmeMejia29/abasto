@@ -208,6 +208,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
     RealtimeChannel? paymentListener;
     StreamSubscription<html.MessageEvent>? messageSub;
     bool isClosing = false;
+    BuildContext? activeDialogCtx;
 
     Future<void> handlePaymentSuccess(String txRef) async {
       if (isClosing) return;
@@ -223,31 +224,34 @@ class _OrdersScreenState extends State<OrdersScreen> {
               'Pago aprobado por Wompi (Ref: $txRef • \$${totalToPay.toStringAsFixed(2)})',
         });
 
+      final existingPin = (order['delivery_pin'] ?? '').toString().trim();
+      final generatedPin = existingPin.length == 4
+          ? existingPin
+          : (1000 + (DateTime.now().millisecondsSinceEpoch % 9000)).toString();
+
       try {
         await supabase.from('orders').update({
           'status': 'confirmado',
+          'delivery_pin': generatedPin,
           'payment_reference': txRef,
           'status_history': newHistory,
         }).eq('id', orderId);
       } catch (e) {
         debugPrint('Error pasando orden a confirmado: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('No se pudo actualizar el estado en BD: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
 
-      try {
-        final existingPin = (order['delivery_pin'] ?? '').toString().trim();
-        final generatedPin = existingPin.length == 4
-            ? existingPin
-            : (1000 + (DateTime.now().millisecondsSinceEpoch % 9000))
-                .toString();
-        await supabase
-            .from('orders')
-            .update({'delivery_pin': generatedPin}).eq('id', orderId);
-      } catch (e) {
-        debugPrint('Aviso guardando delivery_pin: $e');
+      if (activeDialogCtx != null && activeDialogCtx!.mounted) {
+        Navigator.of(activeDialogCtx!).pop();
       }
-
       if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
         _refresh();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -334,91 +338,94 @@ class _OrdersScreenState extends State<OrdersScreen> {
       await showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (ctx) => Dialog(
-          insetPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          clipBehavior: Clip.antiAlias,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth: 520,
-              maxHeight: MediaQuery.of(ctx).size.height * 0.88,
-            ),
-            child: Column(
-              children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  color: AppColors.navyDark,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.lock_outline,
-                              color: Color(0xFF4ADE80), size: 18),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Pago Seguro • $code (\$${totalToPay.toStringAsFixed(2)})',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
+        builder: (ctx) {
+          activeDialogCtx = ctx;
+          return Dialog(
+            insetPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            clipBehavior: Clip.antiAlias,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: 520,
+                maxHeight: MediaQuery.of(ctx).size.height * 0.88,
+              ),
+              child: Column(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                    color: AppColors.navyDark,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.lock_outline,
+                                color: Color(0xFF4ADE80), size: 18),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Pago Seguro • $code (\$${totalToPay.toStringAsFixed(2)})',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: HtmlElementView(viewType: viewId),
+                  ),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      border:
+                          Border(top: BorderSide(color: Colors.grey.shade200)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.primaryBlue,
+                          ),
+                        ),
+                        SizedBox(width: 10),
+                        Flexible(
+                          child: Text(
+                            'Esperando confirmación automática del banco...',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: AppColors.subtitleGrey,
                             ),
                           ),
-                        ],
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close, color: Colors.white),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        onPressed: () => Navigator.pop(ctx),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: HtmlElementView(viewType: viewId),
-                ),
-                Container(
-                  width: double.infinity,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
-                    border:
-                        Border(top: BorderSide(color: Colors.grey.shade200)),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: const [
-                      SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AppColors.primaryBlue,
                         ),
-                      ),
-                      SizedBox(width: 10),
-                      Flexible(
-                        child: Text(
-                          'Esperando confirmación automática del banco...',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: AppColors.subtitleGrey,
-                          ),
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       );
     } catch (e) {
       if (mounted) {
