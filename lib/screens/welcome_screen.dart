@@ -8,6 +8,9 @@ import 'admin/admin_settlements_screen.dart';
 import 'auth_screen.dart';
 import 'driver_delivery_screen.dart';
 
+import 'dart:html' as html;
+import 'dart:js_util' as js_util;
+
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
 
@@ -135,6 +138,58 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  bool get _isAlreadyInstalled {
+    try {
+      return js_util.callMethod(html.window, 'isRunningStandalone', []) == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _installPwaApp() async {
+    try {
+      final promise = js_util.callMethod(html.window, 'triggerPwaInstall', []);
+      final accepted = await js_util.promiseToFuture<bool>(promise);
+      if (accepted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('¡Abasto se agregó a tu pantalla de inicio!'),
+            backgroundColor: AppColors.tealMint,
+          ),
+        );
+        return;
+      }
+    } catch (_) {}
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: const [
+            Icon(Icons.install_mobile_rounded, color: AppColors.primaryBlue),
+            SizedBox(width: 8),
+            Text('Instalar Abasto en tu Celular',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const Text(
+          '• En Android (Chrome): Toca los 3 puntos (⋮) arriba a la derecha y selecciona "Agregar a la pantalla principal" o "Instalar aplicación".\n\n'
+          '• En iPhone (Safari): Toca el ícono Compartir (□↑) abajo y selecciona "Agregar a inicio".',
+          style: TextStyle(fontSize: 13, height: 1.45),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.navyDark),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Entendido', style: TextStyle(color: Colors.white)),
+          ),
+        ],
       ),
     );
   }
@@ -364,11 +419,38 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                           ),
                           SizedBox(width: 8),
                           Icon(Icons.arrow_forward, size: 20, color: Colors.white),
+                          
                         ],
                       ),
                     ),
                   ),
 
+                  if (!_isAlreadyInstalled) ...[
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 44,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.navyDark,
+                          backgroundColor: const Color(0xFFF8FAFC),
+                          side: const BorderSide(color: Color(0xFFCBD5E1)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onPressed: _installPwaApp,
+                        icon: const Icon(Icons.add_to_home_screen_rounded,
+                            size: 18, color: Color(0xFF26A69A)),
+                        label: const Text(
+                          'Agregar a pantalla de inicio',
+                          style: TextStyle(
+                              fontSize: 13.5, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  ],
+                  
                   const SizedBox(height: 12),
 
                   // Acceso rápido para Motorista / Repartidor

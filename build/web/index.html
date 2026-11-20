@@ -65,7 +65,7 @@ _flutter.buildConfig = {"engineRevision":"c416acfeb8126e097f758c664aaa3da929e27d
 
 _flutter.loader.load({
   serviceWorkerSettings: {
-    serviceWorkerVersion: "2790084284" /* Flutter's service worker is deprecated and will be removed in a future Flutter release. */
+    serviceWorkerVersion: "2709683399" /* Flutter's service worker is deprecated and will be removed in a future Flutter release. */
   }
 });
 
@@ -87,6 +87,25 @@ _flutter.loader.load({
     messagingSenderId: "467568058533",
     appId: "1:467568058533:web:a36598ccf13196df232d4c",
     measurementId: "G-NW0GVX6129"
+  };
+</script>
+<script>
+  window.deferredPwaPrompt = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    window.deferredPwaPrompt = e;
+  });
+  window.triggerPwaInstall = async function () {
+    if (window.deferredPwaPrompt) {
+      window.deferredPwaPrompt.prompt();
+      const { outcome } = await window.deferredPwaPrompt.userChoice;
+      window.deferredPwaPrompt = null;
+      return outcome === 'accepted';
+    }
+    return false;
+  };
+  window.isRunningStandalone = function () {
+    return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
   };
 </script>
 </body>

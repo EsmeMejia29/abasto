@@ -516,64 +516,65 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ],
                   ),
-                  Row(
-                    children: [
-                      TextButton.icon(
-                        style: TextButton.styleFrom(
-                          backgroundColor: AppColors.tealMint,
-                          foregroundColor: const Color(0xFF001A2C),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
+                  Builder(
+                    builder: (context) {
+                      final isCompact =
+                          MediaQuery.of(context).size.width < 430;
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextButton.icon(
+                            style: TextButton.styleFrom(
+                              backgroundColor: AppColors.tealMint,
+                              foregroundColor: const Color(0xFF001A2C),
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isCompact ? 9 : 12,
+                                vertical: 8,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                            ),
+                            onPressed: _showPriceComparatorModal,
+                            icon: const Icon(Icons.compare_arrows_rounded,
+                                size: 17),
+                            label: Text(
+                              isCompact ? 'Comparar' : 'Comparar Precios',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12.5,
+                              ),
+                            ),
                           ),
-                        ),
-                        onPressed: _showPriceComparatorModal,
-                        icon: const Icon(Icons.compare_arrows_rounded, size: 17),
-                        label: const Text(
-                          'Comparar Precios',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12.5,
+                          SizedBox(width: isCompact ? 4 : 6),
+                          TextButton.icon(
+                            style: TextButton.styleFrom(
+                              backgroundColor: Colors.white.withOpacity(0.10),
+                              foregroundColor: AppColors.tealMint,
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isCompact ? 9 : 12,
+                                vertical: 8,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                            ),
+                            onPressed: () => InteractiveTutorialModal.show(
+                                context,
+                                isSupplier: false),
+                            icon: const Icon(Icons.help_outline_rounded,
+                                size: 17),
+                            label: const Text(
+                              'Tutorial',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12.5,
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      TextButton.icon(
-                        style: TextButton.styleFrom(
-                          backgroundColor: Colors.white.withOpacity(0.10),
-                          foregroundColor: AppColors.tealMint,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                        ),
-                        onPressed: () => InteractiveTutorialModal.show(
-                            context,
-                            isSupplier: false),
-                        icon: const Icon(Icons.help_outline_rounded, size: 17),
-                        label: const Text(
-                          'Tutorial',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12.5,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        tooltip: 'Actualizar catálogo',
-                        icon: const Icon(Icons.refresh_rounded,
-                            color: Colors.white70),
-                        onPressed: () {
-                          _loadRestaurantProfile();
-                          setState(() {
-                            _suppliersFuture = _fetchSuppliers();
-                          });
-                        },
-                      ),
-                    ],
+                        ],
+                      );
+                    },
                   ),
                 ],
               ),

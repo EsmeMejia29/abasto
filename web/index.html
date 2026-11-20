@@ -47,5 +47,24 @@
     measurementId: "G-NW0GVX6129"
   };
 </script>
+<script>
+  window.deferredPwaPrompt = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    window.deferredPwaPrompt = e;
+  });
+  window.triggerPwaInstall = async function () {
+    if (window.deferredPwaPrompt) {
+      window.deferredPwaPrompt.prompt();
+      const { outcome } = await window.deferredPwaPrompt.userChoice;
+      window.deferredPwaPrompt = null;
+      return outcome === 'accepted';
+    }
+    return false;
+  };
+  window.isRunningStandalone = function () {
+    return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  };
+</script>
 </body>
 </html>
