@@ -19,14 +19,17 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
   final TextEditingController _restaurantSearchCtrl = TextEditingController();
   final TextEditingController _commerceSearchCtrl = TextEditingController();
   final TextEditingController _globalOrderSearchCtrl = TextEditingController();
+  final TextEditingController _chatSearchCtrl = TextEditingController();
   String _searchQuery = '';
   String _restaurantSearchQuery = '';
   String _commerceSearchQuery = '';
   String _globalOrderSearchQuery = '';
+  String _chatSearchQuery = '';
   String _commerceRoleFilter = 'todos'; // 'todos', 'supplier', 'restaurant', 'pendiente_verif'
   String _globalOrderFilter = 'todos'; // 'todos', 'sin_dte', 'pendiente', 'entregado'
+  String? _selectedChatOrderId;
 
-  // Control de pestañas: 0 = Distribuidores & Banco, 1 = Restaurantes & Cobros
+  // Control de pestañas: 0 = Liquidaciones, 1 = Restaurantes, 2 = Comercios, 3 = Órdenes & DTE, 4 = Chats B2B
   int _currentNavIndex = 0;
 
   // Filtros principales
@@ -56,6 +59,9 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
     _globalOrderSearchCtrl.addListener(() {
       setState(() => _globalOrderSearchQuery = _globalOrderSearchCtrl.text.trim().toLowerCase());
     });
+    _chatSearchCtrl.addListener(() {
+      setState(() => _chatSearchQuery = _chatSearchCtrl.text.trim().toLowerCase());
+    });
   }
 
   @override
@@ -64,6 +70,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
     _restaurantSearchCtrl.dispose();
     _commerceSearchCtrl.dispose();
     _globalOrderSearchCtrl.dispose();
+    _chatSearchCtrl.dispose();
     super.dispose();
   }
 
@@ -400,11 +407,21 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
         .where((p) => p['role'] == 'supplier' || p['role'] == 'restaurant')
         .toList();
 
+    List<dynamic> allChatMessages = [];
+    try {
+      final msgsRes = await supabase
+          .from('order_messages')
+          .select('*')
+          .order('created_at', ascending: true);
+      allChatMessages = List<dynamic>.from(msgsRes);
+    } catch (_) {}
+
     return {
       'suppliers': summaryList,
       'restaurants': restaurantSummaryList,
       'allCommerces': allCommerces,
       'globalOrders': globalOrders,
+      'allChatMessages': allChatMessages,
       'bankTotalInflows': totalCollectedFromRestaurants,
       'shouldBeInBankNow': shouldBeInBankNow,
       'totalPendingToPayOut': totalPendingToPayOut,
@@ -1381,6 +1398,32 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
     );
   }
 
+  Widget _buildResponsiveCardGrid({
+    required List<Map<String, dynamic>> items,
+    required Widget Function(Map<String, dynamic>) itemBuilder,
+    required bool isDesktop,
+    double desktopExtent = 250,
+  }) {
+    if (!isDesktop) {
+      return Column(
+        children: items.map((e) => itemBuilder(e)).toList(),
+      );
+    }
+
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 14,
+        mainAxisExtent: desktopExtent,
+      ),
+      itemCount: items.length,
+      itemBuilder: (_, idx) => itemBuilder(items[idx]),
+    );
+  }
+  
   // --- SECCIÓN 1: VISTA DE DISTRIBUIDORES ---
   Widget _buildSuppliersTab(Map<String, dynamic> data, bool isDesktop) {
     final List<Map<String, dynamic>> allSuppliers = data['suppliers'] ?? [];
@@ -1555,41 +1598,109 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: const Color(0xFFE2E8F0)),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: _searchCtrl,
-                decoration: InputDecoration(
-                  hintText: 'Buscar distribuidora o titular de cuenta...',
-                  prefixIcon: const Icon(Icons.search, size: 18),
-                  suffixIcon: _searchQuery.isNotEmpty
-                      ? IconButton(icon: const Icon(Icons.clear, size: 16), onPressed: () => _searchCtrl.clear())
-                      : null,
-                  filled: true,
-                  fillColor: const Color(0xFFF8FAFC),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade300)),
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: SegmentedButton<String>(
-                  showSelectedIcon: false,
-                  segments: [
-                    ButtonSegment(value: 'con_saldo', label: Text('Por Pagar ($conSaldoCount)')),
-                    ButtonSegment(value: 'pagados', label: Text('Pagados ($pagadosCount)')),
-                    ButtonSegment(value: 'todos', label: Text('Todos (${allSuppliers.length})')),
-                    ButtonSegment(value: 'al_dia', label: Text('Al Día ($alDiaCount)')),
+          child: isDesktop
+              ? Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _searchCtrl,
+                        decoration: InputDecoration(
+                          hintText: 'Buscar distribuidora o titular de cuenta...',
+                          prefixIcon: const Icon(Icons.search, size: 18),
+                          suffixIcon: _searchQuery.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, size: 16),
+                                  onPressed: () => _searchCtrl.clear())
+                              : null,
+                          filled: true,
+                          fillColor: const Color(0xFFF1F5F9),
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: BorderSide.none),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    SegmentedButton<String>(
+                      showSelectedIcon: false,
+                      segments: [
+                        ButtonSegment(
+                            value: 'con_saldo',
+                            label: Text('Por Pagar ($conSaldoCount)')),
+                        ButtonSegment(
+                            value: 'pagados',
+                            label: Text('Pagados ($pagadosCount)')),
+                        ButtonSegment(
+                            value: 'todos',
+                            label: Text('Todos (${allSuppliers.length})')),
+                        ButtonSegment(
+                            value: 'al_dia',
+                            label: Text('Al Día ($alDiaCount)')),
+                      ],
+                      selected: {_statusFilter},
+                      onSelectionChanged: (val) =>
+                          setState(() => _statusFilter = val.first),
+                      style: SegmentedButton.styleFrom(
+                        selectedBackgroundColor: const Color(0xFF001A2C),
+                        selectedForegroundColor: Colors.white,
+                      ),
+                    ),
                   ],
-                  selected: {_statusFilter},
-                  onSelectionChanged: (val) => setState(() => _statusFilter = val.first),
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: _searchCtrl,
+                      decoration: InputDecoration(
+                        hintText: 'Buscar distribuidora o titular de cuenta...',
+                        prefixIcon: const Icon(Icons.search, size: 18),
+                        suffixIcon: _searchQuery.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, size: 16),
+                                onPressed: () => _searchCtrl.clear())
+                            : null,
+                        filled: true,
+                        fillColor: const Color(0xFFF1F5F9),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: BorderSide.none),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: SegmentedButton<String>(
+                        showSelectedIcon: false,
+                        segments: [
+                          ButtonSegment(
+                              value: 'con_saldo',
+                              label: Text('Por Pagar ($conSaldoCount)')),
+                          ButtonSegment(
+                              value: 'pagados',
+                              label: Text('Pagados ($pagadosCount)')),
+                          ButtonSegment(
+                              value: 'todos',
+                              label: Text('Todos (${allSuppliers.length})')),
+                          ButtonSegment(
+                              value: 'al_dia',
+                              label: Text('Al Día ($alDiaCount)')),
+                        ],
+                        selected: {_statusFilter},
+                        onSelectionChanged: (val) =>
+                            setState(() => _statusFilter = val.first),
+                        style: SegmentedButton.styleFrom(
+                          selectedBackgroundColor: const Color(0xFF001A2C),
+                          selectedForegroundColor: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ],
-          ),
         ),
 
         if (filtered.isEmpty)
@@ -1599,7 +1710,12 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
             child: const Text('No hay distribuidoras que coincidan con estos filtros.', style: TextStyle(color: AppColors.subtitleGrey)),
           )
         else
-          ...filtered.map((item) => _buildSupplierCard(item, isDesktop)),
+          _buildResponsiveCardGrid(
+            items: filtered,
+            isDesktop: isDesktop,
+            desktopExtent: 285,
+            itemBuilder: (item) => _buildSupplierCard(item, isDesktop),
+          ),
       ],
     );
   }
@@ -1866,7 +1982,12 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
             child: const Text('No se encontraron restaurantes.', style: TextStyle(color: AppColors.subtitleGrey)),
           )
         else
-          ...filtered.map((rest) => _buildRestaurantCard(rest, isDesktop)),
+          _buildResponsiveCardGrid(
+            items: filtered,
+            isDesktop: isDesktop,
+            desktopExtent: 295,
+            itemBuilder: (rest) => _buildRestaurantCard(rest, isDesktop),
+          ),
       ],
     );
   }
@@ -2099,7 +2220,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
   }
 
   // --- SECCIÓN 3: VERIFICACIÓN DE COMERCIOS Y BONOS PROMOCIONALES ---
-  Widget _buildCommercesTab(Map<String, dynamic> data) {
+  Widget _buildCommercesTab(Map<String, dynamic> data, bool isDesktop) {
     final allCommerces = (data['allCommerces'] as List<Map<String, dynamic>>? ?? []);
 
     final filtered = allCommerces.where((c) {
@@ -2187,154 +2308,173 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
             ],
           ),
         ),
-        ...filtered.map((c) {
-          final isSupplier = c['role'] == 'supplier';
-          final isVerified = c['is_verified'] == true;
-          final name = c['business_name'] ?? 'Comercio';
-          final legalName = (c['legal_name'] ?? '').toString();
-          final nrc = (c['nrc'] ?? '').toString();
-          final nit = (c['nit'] ?? '').toString();
-          final legacy = (c['nrc_nit'] ?? '').toString();
-          final credits = (c[isSupplier
-                      ? 'supplier_free_commission_orders'
-                      : 'free_commission_orders'] as num?)
-                  ?.toInt() ??
-              0;
+        _buildResponsiveCardGrid(
+          items: filtered,
+          isDesktop: isDesktop,
+          desktopExtent: 215,
+          itemBuilder: (c) {
+            final isSupplier = c['role'] == 'supplier';
+            final isVerified = c['is_verified'] == true;
+            final name = c['business_name'] ?? 'Comercio';
+            final legalName = (c['legal_name'] ?? '').toString();
+            final nrc = (c['nrc'] ?? '').toString();
+            final nit = (c['nit'] ?? '').toString();
+            final legacy = (c['nrc_nit'] ?? '').toString();
+            final credits = (c[isSupplier
+                        ? 'supplier_free_commission_orders'
+                        : 'free_commission_orders'] as num?)
+                    ?.toInt() ??
+                0;
 
-          return Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-              side: BorderSide(
-                  color: isVerified
-                      ? const Color(0xFFA7F3D0)
-                      : const Color(0xFFE2E8F0)),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 18,
-                        backgroundColor: isSupplier
-                            ? const Color(0xFFDCFCE7)
-                            : const Color(0xFFE0F2FE),
-                        child: Icon(
-                          isSupplier ? Icons.storefront : Icons.restaurant,
-                          size: 18,
-                          color: isSupplier
-                              ? const Color(0xFF16A34A)
-                              : const Color(0xFF0369A1),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Flexible(
-                                  child: Text(
-                                    name,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 15,
-                                        color: AppColors.navyDark),
-                                  ),
-                                ),
-                                if (isVerified) ...[
-                                  const SizedBox(width: 5),
-                                  const Icon(Icons.verified,
-                                      size: 17, color: AppColors.tealMint),
-                                ],
-                              ],
-                            ),
-                            Text(
-                              '${isSupplier ? 'Distribuidor' : 'Restaurante'} • ${c['phone'] ?? ''} • ${c['email'] ?? ''}',
-                              style: const TextStyle(
-                                  fontSize: 11.5,
-                                  color: AppColors.subtitleGrey),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Switch(
-                        value: isVerified,
-                        activeColor: AppColors.tealMint,
-                        onChanged: (_) => _toggleCommerceVerification(
-                            c['id'].toString(), name, isVerified),
-                      ),
-                    ],
-                  ),
-                  const Divider(height: 16),
-                  Text(
-                    'Razón Social: ${legalName.isNotEmpty ? legalName : 'No registrada'}',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  Text(
-                    (nrc.isNotEmpty || nit.isNotEmpty)
-                        ? 'NRC: ${nrc.isNotEmpty ? nrc : 'N/A'}  •  NIT: ${nit.isNotEmpty ? nit : 'N/A'}'
-                        : 'Registro Fiscal: ${legacy.isNotEmpty ? legacy : 'Sin registrar'}',
-                    style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.primaryBlue),
-                  ),
-                  const SizedBox(height: 10),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF8FAFC),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            return Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: BorderSide(
+                    color: isVerified
+                        ? const Color(0xFFA7F3D0)
+                        : const Color(0xFFE2E8F0)),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       children: [
-                        Text(
-                          'Bonos 0% comisión disponibles: $credits',
-                          style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.navyDark),
+                        CircleAvatar(
+                          radius: 18,
+                          backgroundColor: isSupplier
+                              ? const Color(0xFFDCFCE7)
+                              : const Color(0xFFE0F2FE),
+                          child: Icon(
+                            isSupplier ? Icons.storefront : Icons.restaurant,
+                            size: 18,
+                            color: isSupplier
+                                ? const Color(0xFF16A34A)
+                                : const Color(0xFF0369A1),
+                          ),
                         ),
-                        Row(
-                          children: [
-                            IconButton(
-                              tooltip: 'Quitar 1 bono',
-                              icon: const Icon(Icons.remove_circle_outline,
-                                  color: Colors.red, size: 20),
-                              onPressed: credits > 0
-                                  ? () => _adjustPromoCredits(c, -1)
-                                  : null,
-                            ),
-                            IconButton(
-                              tooltip: 'Otorgar +1 pedido sin comisión',
-                              icon: const Icon(Icons.add_circle_outline,
-                                  color: Color(0xFF16A34A), size: 20),
-                              onPressed: () => _adjustPromoCredits(c, 1),
-                            ),
-                          ],
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 15,
+                                          color: AppColors.navyDark),
+                                    ),
+                                  ),
+                                  if (isVerified) ...[
+                                    const SizedBox(width: 5),
+                                    const Icon(Icons.verified,
+                                        size: 17, color: AppColors.tealMint),
+                                  ],
+                                ],
+                              ),
+                              Text(
+                                '${isSupplier ? 'Distribuidor' : 'Restaurante'} • ${c['phone'] ?? ''} • ${c['email'] ?? ''}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontSize: 11.5,
+                                    color: AppColors.subtitleGrey),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Switch(
+                          value: isVerified,
+                          activeColor: AppColors.tealMint,
+                          onChanged: (_) => _toggleCommerceVerification(
+                              c['id'].toString(), name, isVerified),
                         ),
                       ],
                     ),
-                  ),
-                ],
+                    const Divider(height: 14),
+                    Text(
+                      'Razón Social: ${legalName.isNotEmpty ? legalName : 'No registrada'}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    Text(
+                      (nrc.isNotEmpty || nit.isNotEmpty)
+                          ? 'NRC: ${nrc.isNotEmpty ? nrc : 'N/A'}  •  NIT: ${nit.isNotEmpty ? nit : 'N/A'}'
+                          : 'Registro Fiscal: ${legacy.isNotEmpty ? legacy : 'Sin registrar'}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primaryBlue),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Bonos 0% comisión: $credits',
+                            style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.navyDark),
+                          ),
+                          Row(
+                            children: [
+                              IconButton(
+                                tooltip: 'Quitar 1 bono',
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                    minWidth: 30, minHeight: 30),
+                                icon: const Icon(Icons.remove_circle_outline,
+                                    color: Colors.red, size: 20),
+                                onPressed: credits > 0
+                                    ? () => _adjustPromoCredits(c, -1)
+                                    : null,
+                              ),
+                              IconButton(
+                                tooltip: 'Otorgar +1 pedido sin comisión',
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                    minWidth: 30, minHeight: 30),
+                                icon: const Icon(Icons.add_circle_outline,
+                                    color: Color(0xFF16A34A), size: 20),
+                                onPressed: () => _adjustPromoCredits(c, 1),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          );
-        }),
+            );
+          },
+        ),
       ],
     );
   }
 
   // --- SECCIÓN 4: MONITOR GLOBAL DE PEDIDOS Y AUDITORÍA DTE ---
-  Widget _buildGlobalOrdersTab(Map<String, dynamic> data) {
+  Widget _buildGlobalOrdersTab(Map<String, dynamic> data, bool isDesktop) {
     final globalOrders = (data['globalOrders'] as List<dynamic>? ?? [])
         .cast<Map<String, dynamic>>();
 
@@ -2432,116 +2572,670 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
             ],
           ),
         ),
-        ...filtered.map((ord) {
-          final st = (ord['status'] ?? 'pendiente').toString();
-          final total = (ord['total_amount'] as num?)?.toDouble() ?? 0.0;
-          final dtePdf = (ord['dte_pdf_url'] ?? '').toString();
-          final dteCode = (ord['dte_generation_code'] ?? '').toString();
-          final hasDte = dtePdf.isNotEmpty || dteCode.isNotEmpty;
-          final taxLabel = (ord['tax_document_type'] ?? 'factura') == 'ccf'
-              ? 'CCF (DTE-03)'
-              : 'Factura (DTE-01)';
+        _buildResponsiveCardGrid(
+          items: filtered,
+          isDesktop: isDesktop,
+          desktopExtent: 145,
+          itemBuilder: (ord) {
+            final st = (ord['status'] ?? 'pendiente').toString();
+            final total = (ord['total_amount'] as num?)?.toDouble() ?? 0.0;
+            final dtePdf = (ord['dte_pdf_url'] ?? '').toString();
+            final dteCode = (ord['dte_generation_code'] ?? '').toString();
+            final hasDte = dtePdf.isNotEmpty || dteCode.isNotEmpty;
+            final taxLabel = (ord['tax_document_type'] ?? 'factura') == 'ccf'
+                ? 'CCF (DTE-03)'
+                : 'Factura (DTE-01)';
 
-          return Card(
-            margin: const EdgeInsets.only(bottom: 10),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: const BorderSide(color: Color(0xFFE2E8F0)),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        '${ord['code']} • $st',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                            color: AppColors.navyDark),
-                      ),
-                      Text(
-                        '\$${total.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                            color: AppColors.primaryBlue),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${ord['restaurant_name']}  →  ${ord['supplier_name']}',
-                    style: const TextStyle(fontSize: 12.5),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: hasDte
-                              ? const Color(0xFFDCFCE7)
-                              : const Color(0xFFFEF3C7),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          hasDte
-                              ? '$taxLabel Adjunto'
-                              : '$taxLabel Pendiente de subir',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: hasDte
-                                ? const Color(0xFF16A34A)
-                                : const Color(0xFFB45309),
-                          ),
-                        ),
-                      ),
-                      if (dtePdf.isNotEmpty)
-                        TextButton.icon(
-                          icon: const Icon(Icons.picture_as_pdf, size: 15),
-                          label: const Text('Ver DTE',
-                              style: TextStyle(fontSize: 11.5)),
-                          onPressed: () => html.window.open(dtePdf, '_blank'),
-                        )
-                      else if (st.toLowerCase() == 'entregado')
-                        TextButton.icon(
-                          icon: const Icon(Icons.chat,
-                              size: 15, color: Color(0xFF25D366)),
-                          label: const Text('Recordar DTE',
-                              style: TextStyle(fontSize: 11.5)),
-                          onPressed: () => _contactViaWhatsApp(
-                            (ord['supplier_phone'] ?? '').toString(),
-                            (ord['supplier_name'] ?? '').toString(),
-                            'Hola ${ord['supplier_name']}, te recordamos subir el $taxLabel de la orden ${ord['code']} en Abasto para completar el respaldo fiscal del restaurante.',
-                          ),
-                        ),
-                    ],
-                  ),
-                ],
+            return Card(
+              margin: const EdgeInsets.only(bottom: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: const BorderSide(color: Color(0xFFE2E8F0)),
               ),
-            ),
-          );
-        }),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '${ord['code']} • $st',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: AppColors.navyDark),
+                        ),
+                        Text(
+                          '\$${total.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: AppColors.primaryBlue),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      '${ord['restaurant_name']}  →  ${ord['supplier_name']}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12.5),
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: hasDte
+                                ? const Color(0xFFDCFCE7)
+                                : const Color(0xFFFEF3C7),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            hasDte
+                                ? '$taxLabel Adjunto'
+                                : '$taxLabel Pendiente de subir',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: hasDte
+                                  ? const Color(0xFF16A34A)
+                                  : const Color(0xFFB45309),
+                            ),
+                          ),
+                        ),
+                        if (dtePdf.isNotEmpty)
+                          TextButton.icon(
+                            style: TextButton.styleFrom(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 6),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            icon: const Icon(Icons.picture_as_pdf, size: 15),
+                            label: const Text('Ver DTE',
+                                style: TextStyle(fontSize: 11.5)),
+                            onPressed: () =>
+                                html.window.open(dtePdf, '_blank'),
+                          )
+                        else if (st.toLowerCase() == 'entregado')
+                          TextButton.icon(
+                            style: TextButton.styleFrom(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 6),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            icon: const Icon(Icons.chat,
+                                size: 15, color: Color(0xFF25D366)),
+                            label: const Text('Recordar DTE',
+                                style: TextStyle(fontSize: 11.5)),
+                            onPressed: () => _contactViaWhatsApp(
+                              (ord['supplier_phone'] ?? '').toString(),
+                              (ord['supplier_name'] ?? '').toString(),
+                              'Hola ${ord['supplier_name']}, te recordamos subir el $taxLabel de la orden ${ord['code']} en Abasto para completar el respaldo fiscal del restaurante.',
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
       ],
     );
   }
 
+  String _formatAdminChatTime(dynamic raw) {
+    if (raw == null) return '';
+    try {
+      final dt = DateTime.parse(raw.toString()).toLocal();
+      final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
+      final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+      final min = dt.minute.toString().padLeft(2, '0');
+      return '${dt.day}/${dt.month} $h:$min $ampm';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  String _formatReadableMessagePreview(String rawText) {
+    if (rawText.startsWith('[LOCATION]|')) {
+      final parts = rawText.split('|');
+      return '📍 Ubicación GPS: ${parts.length > 3 ? parts[3] : 'Coordenadas enviadas'}';
+    }
+    if (rawText.startsWith('[ADDRESS]|')) {
+      return '📍 Dirección: ${rawText.replaceFirst('[ADDRESS]|', '')}';
+    }
+    if (rawText.startsWith('[IMAGE]|')) {
+      return '📷 Fotografía adjunta';
+    }
+    if (rawText.startsWith('[ETA]|')) {
+      return '🚚 Llegada estimada: ${rawText.replaceFirst('[ETA]|', '')}';
+    }
+    return rawText;
+  }
+
+  Widget _buildAdminChatBubble(
+      Map<String, dynamic> msg, Map<String, dynamic> order) {
+    final senderId = msg['sender_id']?.toString() ?? '';
+    final isSupplierSender = senderId == order['supplier_id']?.toString();
+    final senderName = (msg['sender_name'] ??
+            (isSupplierSender
+                ? order['supplier_name']
+                : order['restaurant_name']))
+        .toString();
+    final rawText = (msg['message'] ?? msg['content'] ?? '').toString();
+    final timeStr = _formatAdminChatTime(msg['created_at']);
+
+    Widget contentWidget;
+    if (rawText.startsWith('[LOCATION]|')) {
+      final parts = rawText.split('|');
+      final lat = parts.length > 1 ? parts[1] : '13.6929';
+      final lng = parts.length > 2 ? parts[2] : '-89.2182';
+      final label = parts.length > 3 ? parts[3] : 'Ubicación GPS compartida';
+      final mapsUrl =
+          'https://www.google.com/maps/search/?api=1&query=$lat,$lng';
+      contentWidget = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.location_on, size: 15, color: Colors.red),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.bold,
+                    color: isSupplierSender ? Colors.white : AppColors.navyDark,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          TextButton.icon(
+            style: TextButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: AppColors.navyDark,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              minimumSize: Size.zero,
+            ),
+            icon: const Icon(Icons.map_outlined, size: 14),
+            label: const Text('Abrir en Google Maps',
+                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+            onPressed: () => html.window.open(mapsUrl, '_blank'),
+          ),
+        ],
+      );
+    } else if (rawText.startsWith('[IMAGE]|')) {
+      final url = rawText.replaceFirst('[IMAGE]|', '').trim();
+      contentWidget = InkWell(
+        onTap: () => html.window.open(url, '_blank'),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Image.network(
+            url,
+            height: 160,
+            width: 240,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => const Text('Imagen no disponible'),
+          ),
+        ),
+      );
+    } else if (rawText.startsWith('[ETA]|')) {
+      final eta = rawText.replaceFirst('[ETA]|', '').trim();
+      contentWidget = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.local_shipping_rounded,
+              size: 16, color: AppColors.tealMint),
+          const SizedBox(width: 6),
+          Text(
+            'Tiempo estimado de llegada: $eta',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+              color: isSupplierSender ? Colors.white : AppColors.navyDark,
+            ),
+          ),
+        ],
+      );
+    } else {
+      final cleanText = rawText.startsWith('[ADDRESS]|')
+          ? '📍 ${rawText.replaceFirst('[ADDRESS]|', '')}'
+          : rawText;
+      contentWidget = Text(
+        cleanText,
+        style: TextStyle(
+          fontSize: 13.5,
+          color: isSupplierSender ? Colors.white : const Color(0xFF1E293B),
+          height: 1.35,
+        ),
+      );
+    }
+
+    return Align(
+      alignment:
+          isSupplierSender ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 460),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: isSupplierSender ? const Color(0xFF001A2C) : Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: isSupplierSender
+              ? null
+              : Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: isSupplierSender
+                        ? AppColors.tealMint.withOpacity(0.18)
+                        : const Color(0xFFE0F2FE),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    isSupplierSender ? 'DISTRIBUIDOR' : 'RESTAURANTE',
+                    style: TextStyle(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.bold,
+                      color: isSupplierSender
+                          ? AppColors.tealMint
+                          : const Color(0xFF0369A1),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    senderName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: isSupplierSender
+                          ? Colors.white70
+                          : AppColors.subtitleGrey,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            contentWidget,
+            if (timeStr.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  timeStr,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: isSupplierSender
+                        ? Colors.white60
+                        : Colors.grey.shade500,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+Widget _buildChatsMonitorTab(Map<String, dynamic> data, bool isDesktop) {
+    final List<dynamic> globalOrders = data['globalOrders'] ?? [];
+    final List<dynamic> allMessages = data['allChatMessages'] ?? [];
+
+    final Map<String, List<dynamic>> msgsByOrder = {};
+    for (final m in allMessages) {
+      final oid = m['order_id']?.toString() ?? '';
+      if (oid.isEmpty) continue;
+      msgsByOrder.putIfAbsent(oid, () => []).add(m);
+    }
+
+    // Órdenes que tienen conversación activa, ordenadas por último mensaje
+    final threads = globalOrders
+        .where((o) => msgsByOrder.containsKey(o['id'].toString()))
+        .where((o) {
+      if (_chatSearchQuery.isEmpty) return true;
+      final code = (o['code'] ?? '').toString().toLowerCase();
+      final rest = (o['restaurant_name'] ?? '').toString().toLowerCase();
+      final supp = (o['supplier_name'] ?? '').toString().toLowerCase();
+      return code.contains(_chatSearchQuery) ||
+          rest.contains(_chatSearchQuery) ||
+          supp.contains(_chatSearchQuery);
+    }).toList();
+
+    threads.sort((a, b) {
+      final aLast = msgsByOrder[a['id'].toString()]!.last['created_at'] ?? '';
+      final bLast = msgsByOrder[b['id'].toString()]!.last['created_at'] ?? '';
+      return bLast.toString().compareTo(aLast.toString());
+    });
+
+    if (threads.isNotEmpty &&
+        (_selectedChatOrderId == null ||
+            !threads.any((t) => t['id'].toString() == _selectedChatOrderId))) {
+      _selectedChatOrderId = threads.first['id'].toString();
+    }
+
+    Map<String, dynamic>? selectedOrder;
+    if (threads.isNotEmpty) {
+      selectedOrder = Map<String, dynamic>.from(threads.first);
+      for (final t in threads) {
+        if (t['id'].toString() == _selectedChatOrderId) {
+          selectedOrder = Map<String, dynamic>.from(t);
+          break;
+        }
+      }
+    }
+
+    final List<dynamic> selectedMessages = selectedOrder != null
+        ? (msgsByOrder[selectedOrder['id'].toString()] ?? [])
+        : [];
+
+    Widget threadListPanel = Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: TextField(
+              controller: _chatSearchCtrl,
+              decoration: InputDecoration(
+                hintText: 'Buscar orden, restaurante o distribuidor...',
+                prefixIcon: const Icon(Icons.search, size: 18),
+                filled: true,
+                fillColor: const Color(0xFFF1F5F9),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ),
+          const Divider(height: 1),
+          if (threads.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(28),
+              child: Text(
+                'Aún no hay conversaciones registradas entre comercios.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppColors.subtitleGrey, fontSize: 13),
+              ),
+            )
+          else
+            SizedBox(
+              height: isDesktop ? 520 : 240,
+              child: ListView.separated(
+                itemCount: threads.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (_, idx) {
+                  final ord = threads[idx];
+                  final oid = ord['id'].toString();
+                  final msgs = msgsByOrder[oid] ?? [];
+                  final lastMsg = msgs.isNotEmpty ? msgs.last : null;
+                  final isSelected = oid == _selectedChatOrderId;
+                  final hasIncident = ord['has_incident'] == true;
+
+                  return ListTile(
+                    selected: isSelected,
+                    selectedTileColor: const Color(0xFFF1F5F9),
+                    onTap: () => setState(() => _selectedChatOrderId = oid),
+                    title: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              ord['code'] ?? 'ORD',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13.5,
+                                color: AppColors.navyDark,
+                              ),
+                            ),
+                            if (hasIncident) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFEE2E2),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  'INCIDENCIA',
+                                  style: TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFFDC2626),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF001A2C),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '${msgs.length}',
+                            style: const TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.tealMint,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 2),
+                        Text(
+                          '${ord['restaurant_name']} ↔ ${ord['supplier_name']}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.primaryBlue,
+                          ),
+                        ),
+                        if (lastMsg != null) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            _formatReadableMessagePreview(
+                                (lastMsg['message'] ?? '').toString()),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              color: AppColors.subtitleGrey,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+
+    Widget conversationPanel = Container(
+      height: isDesktop ? 585 : 440,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: selectedOrder == null
+          ? const Center(
+              child: Text(
+                'Selecciona una orden para auditar sus mensajes.',
+                style: TextStyle(color: AppColors.subtitleGrey),
+              ),
+            )
+          : Column(
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  color: const Color(0xFF001A2C),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${selectedOrder['code']} • ${selectedOrder['restaurant_name']} ↔ ${selectedOrder['supplier_name']}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                            Text(
+                              'Estado: ${(selectedOrder['status'] ?? '').toString().toUpperCase()} • Total: \$${((selectedOrder['total_amount'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                color: AppColors.tealMint,
+                                fontSize: 11.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Chip(
+                        backgroundColor: Color(0xFF1B3452),
+                        side: BorderSide.none,
+                        label: Text(
+                          'Solo Lectura',
+                          style: TextStyle(
+                              color: Colors.white70, fontSize: 11),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: selectedMessages.length,
+                    itemBuilder: (_, i) => _buildAdminChatBubble(
+                      Map<String, dynamic>.from(selectedMessages[i]),
+                      selectedOrder!,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+    );
+
+    if (isDesktop) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(flex: 4, child: threadListPanel),
+          const SizedBox(width: 18),
+          Expanded(flex: 6, child: conversationPanel),
+        ],
+      );
+    }
+
+    return Column(
+      children: [
+        threadListPanel,
+        const SizedBox(height: 14),
+        conversationPanel,
+      ],
+    );
+  }
+  
   @override
   Widget build(BuildContext context) {
+    final navItems = const [
+      {
+        'icon': Icons.account_balance_wallet_outlined,
+        'selectedIcon': Icons.account_balance_wallet,
+        'label': 'Liquidaciones',
+        'title': 'Liquidación a Distribuidores',
+      },
+      {
+        'icon': Icons.restaurant_outlined,
+        'selectedIcon': Icons.restaurant,
+        'label': 'Restaurantes',
+        'title': 'Cobranza y Restaurantes',
+      },
+      {
+        'icon': Icons.verified_user_outlined,
+        'selectedIcon': Icons.verified_user,
+        'label': 'Comercios',
+        'title': 'Comercios & Bonos',
+      },
+      {
+        'icon': Icons.receipt_long_outlined,
+        'selectedIcon': Icons.receipt_long,
+        'label': 'Órdenes & DTE',
+        'title': 'Monitor Global & DTEs',
+      },
+      {
+        'icon': Icons.forum_outlined,
+        'selectedIcon': Icons.forum,
+        'label': 'Chats B2B',
+        'title': 'Auditoría de Chats B2B',
+      },
+    ];
+
     return LayoutBuilder(
       builder: (context, constraints) {
-        final bool isDesktop = constraints.maxWidth >= 850;
+        final bool isDesktop = constraints.maxWidth >= 900;
 
         return Scaffold(
-          backgroundColor: const Color(0xFFF8FAFC),
+          backgroundColor: const Color(0xFFF1F5F9),
           appBar: AppBar(
+            backgroundColor: const Color(0xFF001A2C),
+            foregroundColor: Colors.white,
+            elevation: 0,
             leading: IconButton(
               tooltip: 'Volver a la pantalla principal',
               icon: const Icon(Icons.home_outlined),
@@ -2550,87 +3244,229 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
                 (route) => false,
               ),
             ),
-            title: Text(
-              _currentNavIndex == 0
-                  ? 'Liquidación a Distribuidores'
-                  : (_currentNavIndex == 1
-                      ? 'Cobranza y Restaurantes'
-                      : (_currentNavIndex == 2
-                          ? 'Comercios & Bonos'
-                          : 'Monitor Global & DTEs')),
-            ),
-            centerTitle: !isDesktop,
-            actions: [
-              IconButton(
-                tooltip: 'Exportar Corte Viernes (CSV)',
-                icon: const Icon(Icons.download_rounded),
-                onPressed: _exportFridaySettlementCsv,
-              ),
-              IconButton(tooltip: 'Actualizar saldos', icon: const Icon(Icons.refresh), onPressed: _refresh),
-            ],
-          ),
-          bottomNavigationBar: NavigationBar(
-            selectedIndex: _currentNavIndex,
-            onDestinationSelected: (idx) => setState(() => _currentNavIndex = idx),
-            destinations: const [
-              NavigationDestination(
-                icon: Icon(Icons.account_balance_wallet_outlined),
-                selectedIcon: Icon(Icons.account_balance_wallet),
-                label: 'Liquidaciones',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.restaurant_outlined),
-                selectedIcon: Icon(Icons.restaurant),
-                label: 'Restaurantes',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.verified_user_outlined),
-                selectedIcon: Icon(Icons.verified_user),
-                label: 'Comercios',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.receipt_long_outlined),
-                selectedIcon: Icon(Icons.receipt_long),
-                label: 'Órdenes & DTE',
-              ),
-            ],
-          ),
-          body: FutureBuilder<Map<String, dynamic>>(
-            future: _dataFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snapshot.hasError) {
-                return Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Text('Error al cargar datos: ${snapshot.error}', style: const TextStyle(color: Colors.red)),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: AppColors.tealMint.withOpacity(0.16),
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                );
-              }
-
-              final data = snapshot.data ?? {};
-
-              return Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 1100),
-                  child: ListView(
-                    padding: EdgeInsets.symmetric(horizontal: isDesktop ? 24 : 14, vertical: 16),
+                  child: const Icon(Icons.admin_panel_settings_rounded,
+                      color: AppColors.tealMint, size: 19),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  navItems[_currentNavIndex]['title'] as String,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 18),
+                ),
+              ],
+            ),
+            actions: [
+              Container(
+                margin: const EdgeInsets.symmetric(vertical: 8),
+                child: TextButton.icon(
+                  style: TextButton.styleFrom(
+                    backgroundColor: Colors.white.withOpacity(0.10),
+                    foregroundColor: AppColors.tealMint,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                  ),
+                  onPressed: _exportFridaySettlementCsv,
+                  icon: const Icon(Icons.download_rounded, size: 17),
+                  label: Text(
+                    isDesktop ? 'Exportar Corte Viernes (CSV)' : 'CSV',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 12.5),
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Actualizar saldos',
+                icon: const Icon(Icons.refresh_rounded),
+                onPressed: _refresh,
+              ),
+            ],
+          ),
+          bottomNavigationBar: isDesktop
+              ? null
+              : NavigationBar(
+                  selectedIndex: _currentNavIndex,
+                  onDestinationSelected: (idx) =>
+                      setState(() => _currentNavIndex = idx),
+                  destinations: navItems
+                      .map((item) => NavigationDestination(
+                            icon: Icon(item['icon'] as IconData),
+                            selectedIcon:
+                                Icon(item['selectedIcon'] as IconData),
+                            label: item['label'] as String,
+                          ))
+                      .toList(),
+                ),
+          body: Row(
+            children: [
+              if (isDesktop)
+                Container(
+                  width: 230,
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    border: Border(
+                      right: BorderSide(color: Color(0xFFE2E8F0)),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      if (_currentNavIndex == 0)
-                        _buildSuppliersTab(data, isDesktop)
-                      else if (_currentNavIndex == 1)
-                        _buildRestaurantsTab(data, isDesktop)
-                      else if (_currentNavIndex == 2)
-                        _buildCommercesTab(data)
-                      else
-                        _buildGlobalOrdersTab(data),
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(18, 20, 18, 8),
+                        child: Text(
+                          'PANEL ADMINISTRATIVO',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.8,
+                            color: AppColors.subtitleGrey,
+                          ),
+                        ),
+                      ),
+                      ...navItems.asMap().entries.map((entry) {
+                        final idx = entry.key;
+                        final item = entry.value;
+                        final selected = _currentNavIndex == idx;
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 4),
+                          child: Material(
+                            color: selected
+                                ? const Color(0xFF001A2C)
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(12),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(12),
+                              onTap: () =>
+                                  setState(() => _currentNavIndex = idx),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 12),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      (selected
+                                          ? item['selectedIcon']
+                                          : item['icon']) as IconData,
+                                      color: selected
+                                          ? AppColors.tealMint
+                                          : const Color(0xFF475569),
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        item['label'] as String,
+                                        style: TextStyle(
+                                          fontSize: 13.5,
+                                          fontWeight: selected
+                                              ? FontWeight.bold
+                                              : FontWeight.w500,
+                                          color: selected
+                                              ? Colors.white
+                                              : AppColors.navyDark,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+                      const Spacer(),
+                      Container(
+                        margin: const EdgeInsets.all(14),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const [
+                            Text(
+                              'Abasto SV • Finanzas',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.navyDark,
+                              ),
+                            ),
+                            SizedBox(height: 3),
+                            Text(
+                              'Conciliación Banco Agrícola y cortes Transfer365.',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: AppColors.subtitleGrey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 ),
-              );
-            },
+              Expanded(
+                child: FutureBuilder<dynamic>(
+                  future: _dataFuture,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (snapshot.hasError) {
+                      return Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Text(
+                            'Error al cargar datos: ${snapshot.error}',
+                            style: const TextStyle(color: Colors.red),
+                          ),
+                        ),
+                      );
+                    }
+
+                    final data = snapshot.data ?? {};
+
+                    return Align(
+                      alignment: Alignment.topCenter,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 1320),
+                        child: ListView(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: isDesktop ? 28 : 14,
+                            vertical: 20,
+                          ),
+                          children: [
+                            if (_currentNavIndex == 0)
+                              _buildSuppliersTab(data, isDesktop)
+                            else if (_currentNavIndex == 1)
+                              _buildRestaurantsTab(data, isDesktop)
+                            else if (_currentNavIndex == 2)
+                              _buildCommercesTab(data, isDesktop)
+                            else if (_currentNavIndex == 3)
+                              _buildGlobalOrdersTab(data, isDesktop)
+                            else
+                              _buildChatsMonitorTab(data, isDesktop),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         );
       },
