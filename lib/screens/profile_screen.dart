@@ -408,7 +408,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               fontSize: 12.5, fontWeight: FontWeight.bold)),
                       onPressed: () {
                         final msg = Uri.encodeComponent(
-                          '¡Hola! Te invito a unirte a Abasto B2B usando mi código $_referralCode. Cuando completes tu primer pedido, ¡ambos tendremos 1 pedido sin comisión! Regístrate aquí: https://abasto-flame.vercel.app/',
+                          '¡Hola! Te invito a unirte a Abasto B2B usando mi código $_referralCode. Cuando completes tu primer pedido, ¡ambos tendremos 1 pedido sin comisión! Regístrate aquí: https://abasto-sv.vercel.app/',
                         );
                         html.window
                             .open('https://wa.me/?text=$msg', '_blank');

@@ -226,7 +226,7 @@ class _AuthScreenState extends State<AuthScreen> {
       final res = await supabase.auth.signUp(
         email: email,
         password: password,
-        emailRedirectTo: 'https://abasto-flame.vercel.app/',
+        emailRedirectTo: 'https://abasto-sv.vercel.app/',
       );
 
       final newUserId = res.user?.id;

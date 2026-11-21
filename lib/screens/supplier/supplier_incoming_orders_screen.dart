@@ -17,6 +17,8 @@ import '../../services/notification_service.dart';
 import '../../utils/csv_exporter.dart';
 import '../../widgets/interactive_tutorial_modal.dart';
 
+import '../../utils/app_badge_service.dart';
+
 class SupplierIncomingOrdersScreen extends StatefulWidget {
   const SupplierIncomingOrdersScreen({super.key});
 
@@ -66,6 +68,11 @@ class _SupplierIncomingOrdersScreenState
           table: 'orders',
           callback: (payload) {
             debugPrint('Actualización de pedidos recibida en distribuidor');
+            if (payload.eventType == PostgresChangeEvent.insert &&
+                payload.newRecord['supplier_id']?.toString() ==
+                    _currentUserId) {
+              AppBadgeService.incrementBadge();
+            }
             if (mounted) _refresh();
           },
         )
@@ -216,6 +223,7 @@ class _SupplierIncomingOrdersScreenState
   }
 
   void _refresh() {
+    AppBadgeService.clearBadge();
     setState(() {
       _ordersFuture = _fetchOrders();
     });
@@ -2452,6 +2460,7 @@ class _SupplierIncomingOrdersScreenState
                           onPressed: () {
                             final oid = order['id'].toString();
                             setState(() => _unreadOrderIds.remove(oid));
+                            AppBadgeService.clearBadge();
                             html.window.localStorage[
                                     'abasto_chat_read_${_currentUserId}_$oid'] =
                                 DateTime.now().toUtc().toIso8601String();

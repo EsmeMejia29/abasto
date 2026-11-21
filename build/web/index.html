@@ -67,7 +67,7 @@ _flutter.buildConfig = {"engineRevision":"c416acfeb8126e097f758c664aaa3da929e27d
 
 _flutter.loader.load({
   serviceWorkerSettings: {
-    serviceWorkerVersion: "4265438824" /* Flutter's service worker is deprecated and will be removed in a future Flutter release. */
+    serviceWorkerVersion: "3720463470" /* Flutter's service worker is deprecated and will be removed in a future Flutter release. */
   }
 });
 
@@ -108,6 +108,77 @@ _flutter.loader.load({
   };
   window.isRunningStandalone = function () {
     return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  };
+</script>
+<script>
+  window._abastoBaseFavicon = 'favicon.png?v=2';
+  window._abastoBadgeCount = 0;
+
+  window.setAbastoNotificationBadge = function (count) {
+    const num = Number(count) || 0;
+    window._abastoBadgeCount = num;
+
+    // 1. Puntito / contador en el ícono de la app instalada (PWA / Teléfono / Escritorio)
+    try {
+      if ('setAppBadge' in navigator) {
+        if (num > 0) {
+          navigator.setAppBadge(num);
+        } else {
+          navigator.clearAppBadge();
+        }
+      }
+    } catch (e) {}
+
+    // 2. Título de la pestaña
+    document.title = num > 0 ? `🔴 (${num}) Abasto` : 'Abasto';
+
+    // 3. Reemplazar todas las etiquetas <link rel="icon"> para forzar el redibujo en Chrome/Edge
+    const applyIconHref = (href) => {
+      document.querySelectorAll("link[rel*='icon']").forEach((el) => el.remove());
+      const link = document.createElement('link');
+      link.type = 'image/png';
+      link.rel = 'icon';
+      link.href = href;
+      document.head.appendChild(link);
+    };
+
+    if (num <= 0) {
+      applyIconHref(window._abastoBaseFavicon);
+      return;
+    }
+
+    const img = new Image();
+    img.onload = function () {
+      const canvas = document.createElement('canvas');
+      canvas.width = 64;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, 64, 64);
+
+      // Círculo rojo grande y visible en la esquina superior derecha
+      ctx.beginPath();
+      ctx.arc(48, 16, 15, 0, 2 * Math.PI);
+      ctx.fillStyle = '#EF4444';
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.stroke();
+
+      applyIconHref(canvas.toDataURL('image/png'));
+    };
+    img.onerror = function () {
+      // Respaldo: dibujar círculo rojo puro si favicon.png falla
+      const canvas = document.createElement('canvas');
+      canvas.width = 64;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      ctx.beginPath();
+      ctx.arc(32, 32, 26, 0, 2 * Math.PI);
+      ctx.fillStyle = '#EF4444';
+      ctx.fill();
+      applyIconHref(canvas.toDataURL('image/png'));
+    };
+    img.src = window._abastoBaseFavicon;
   };
 </script>
 </body>

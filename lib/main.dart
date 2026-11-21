@@ -14,6 +14,7 @@ import 'screens/supplier/supplier_crm_screen.dart';
 import 'screens/supplier/supplier_incoming_orders_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'theme/app_theme.dart';
+import 'utils/app_badge_service.dart';
 
 import 'dart:html' as html;
 
@@ -137,6 +138,7 @@ class _MainNavigationHolderState extends State<MainNavigationHolder> {
   @override
   void initState() {
     super.initState();
+    AppBadgeService.startListening();
     _checkInitialUnread();
     _listenIncomingMessages();
   }
@@ -204,6 +206,7 @@ class _MainNavigationHolderState extends State<MainNavigationHolder> {
                 ord['restaurant_id']?.toString() == _uid &&
                 mounted) {
               setState(() => _hasUnreadChat = true);
+              AppBadgeService.incrementBadge();
             }
           },
         )
@@ -222,7 +225,10 @@ class _MainNavigationHolderState extends State<MainNavigationHolder> {
         onDestinationSelected: (idx) {
           setState(() {
             _currentIndex = idx;
-            if (idx == 1) _hasUnreadChat = false;
+            if (idx == 0) {
+              _hasUnreadChat = false;
+              AppBadgeService.clearBadge();
+            }
           });
         },
         destinations: [
@@ -281,6 +287,7 @@ class _SupplierNavigationHolderState extends State<SupplierNavigationHolder> {
   @override
   void initState() {
     super.initState();
+    AppBadgeService.startListening();
     _checkInitialUnread();
     _listenIncomingMessages();
   }
@@ -348,6 +355,7 @@ class _SupplierNavigationHolderState extends State<SupplierNavigationHolder> {
                 ord['supplier_id']?.toString() == _uid &&
                 mounted) {
               setState(() => _hasUnreadChat = true);
+              AppBadgeService.incrementBadge();
             }
           },
         )

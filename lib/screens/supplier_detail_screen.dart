@@ -40,7 +40,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
   final Map<String, List<dynamic>> _productTiers = {};
   final Map<String, String> _productDescriptions = {};
   final Map<String, String> _productSkus = {};
-  String _selectedTaxDoc = 'ccf'; // 'ccf' (Crédito Fiscal) o 'factura' (Consumidor Final)
+  String _selectedTaxDoc = 'factura'; // 'ccf' (Crédito Fiscal) o 'factura' (Consumidor Final)
   bool _hasCompleteTaxProfile = false;
 
   @override
@@ -81,7 +81,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
         setState(() {
           _freeCredits = (res['free_commission_orders'] as num?)?.toInt() ?? 0;
           _hasCompleteTaxProfile = hasTax;
-          _selectedTaxDoc = hasTax ? 'ccf' : 'factura';
+          _selectedTaxDoc = 'factura';
         });
       }
     } catch (_) {}
@@ -448,55 +448,6 @@ Widget _buildCartBody({
               child: InkWell(
                 borderRadius: BorderRadius.circular(10),
                 onTap: () {
-                  setState(() => _selectedTaxDoc = 'ccf');
-                  onStateChanged?.call();
-                },
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: _selectedTaxDoc == 'ccf'
-                        ? AppColors.navyDark
-                        : const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: _selectedTaxDoc == 'ccf'
-                          ? AppColors.navyDark
-                          : const Color(0xFFCBD5E1),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Crédito Fiscal (CCF)',
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.bold,
-                          color: _selectedTaxDoc == 'ccf'
-                              ? Colors.white
-                              : AppColors.navyDark,
-                        ),
-                      ),
-                      Text(
-                        'DTE-03 • Deduce 13% IVA',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: _selectedTaxDoc == 'ccf'
-                              ? AppColors.tealMint
-                              : AppColors.subtitleGrey,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: InkWell(
-                borderRadius: BorderRadius.circular(10),
-                onTap: () {
                   setState(() => _selectedTaxDoc = 'factura');
                   onStateChanged?.call();
                 },
@@ -532,6 +483,55 @@ Widget _buildCartBody({
                         style: TextStyle(
                           fontSize: 10,
                           color: _selectedTaxDoc == 'factura'
+                              ? AppColors.tealMint
+                              : AppColors.subtitleGrey,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: () {
+                  setState(() => _selectedTaxDoc = 'ccf');
+                  onStateChanged?.call();
+                },
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: _selectedTaxDoc == 'ccf'
+                        ? AppColors.navyDark
+                        : const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: _selectedTaxDoc == 'ccf'
+                          ? AppColors.navyDark
+                          : const Color(0xFFCBD5E1),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Crédito Fiscal (CCF)',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.bold,
+                          color: _selectedTaxDoc == 'ccf'
+                              ? Colors.white
+                              : AppColors.navyDark,
+                        ),
+                      ),
+                      Text(
+                        'DTE-03 • Deduce 13% IVA',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: _selectedTaxDoc == 'ccf'
                               ? AppColors.tealMint
                               : AppColors.subtitleGrey,
                         ),

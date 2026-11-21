@@ -14,6 +14,8 @@ import '../models/supplier.dart';
 import '../utils/csv_exporter.dart';
 import 'supplier_detail_screen.dart';
 
+import '../utils/app_badge_service.dart';
+
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
 
@@ -79,6 +81,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
   }
 
   void _refresh() {
+    AppBadgeService.clearBadge();
     setState(() {
       _ordersFuture = _fetchOrders();
     });
@@ -300,7 +303,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
 
       if (!mounted) return;
 
-      // 1. Escucha cuando Wompi redirige el iframe a abasto-flame.vercel.app con la transacción aprobada
+      // 1. Escucha cuando Wompi redirige el iframe a abasto-sv.vercel.app con la transacción aprobada
       messageSub = html.window.onMessage.listen((event) {
         final msg = event.data;
         if (msg is Map && msg['type'] == 'WOMPI_PAYMENT_APPROVED') {
@@ -1374,6 +1377,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                           onPressed: () {
                             final oid = order['id'].toString();
                             setState(() => _unreadOrderIds.remove(oid));
+                            AppBadgeService.clearBadge();
                             html.window.localStorage[
                                     'abasto_chat_read_${_currentUserId}_$oid'] =
                                 DateTime.now().toUtc().toIso8601String();
