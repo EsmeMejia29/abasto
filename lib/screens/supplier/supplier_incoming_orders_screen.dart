@@ -873,6 +873,22 @@ class _SupplierIncomingOrdersScreenState
             'featured_until': untilIso,
           }).eq('profile_id', _currentUserId);
 
+          try {
+            await supabase.from('featured_subscriptions').upsert(
+              {
+                'supplier_id': _currentUserId,
+                'reference_code': promoCode,
+                'amount': 25.00,
+                'payment_method': 'wompi',
+                'status': 'pagado',
+                'starts_at': baseDate.toUtc().toIso8601String(),
+                'ends_at': untilIso,
+              },
+              onConflict: 'reference_code',
+              ignoreDuplicates: true,
+            );
+          } catch (_) {}
+
           if (mounted) {
             Navigator.of(context, rootNavigator: true).pop();
             ScaffoldMessenger.of(context).showSnackBar(

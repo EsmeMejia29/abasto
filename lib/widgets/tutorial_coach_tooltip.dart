@@ -129,7 +129,7 @@ class _TutorialCoachTooltipState extends State<TutorialCoachTooltip> {
                         ),
                         const SizedBox(height: 4),
                         const Text(
-                          'Mira un tutorial aquí arriba para aprender a usar todas las funciones rápido.',
+                          'Mira un tutorial aquí arriba para aprender a usar todas las funciones.',
                           style: TextStyle(
                             color: Color(0xFFCBD5E1),
                             fontSize: 12,
