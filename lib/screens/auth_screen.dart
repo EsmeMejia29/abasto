@@ -247,6 +247,10 @@ class _AuthScreenState extends State<AuthScreen> {
           );
           if (validInviterId != null) {
             referredById = validInviterId.toString();
+          } else {
+            throw Exception(
+              'El código de invitación "$rawRef" no es válido, ya alcanzó su límite mensual o corresponde a tu mismo rol.',
+            );
           }
         }
 
@@ -257,8 +261,21 @@ class _AuthScreenState extends State<AuthScreen> {
           'business_name': businessName,
           'role': roleString,
           if (referredById != null) 'referred_by': referredById,
+          if (referredById != null) 'free_commission_orders': 1,
           'created_at': DateTime.now().toIso8601String(),
         });
+
+        if (referredById != null) {
+          try {
+            await supabase.rpc(
+              'grant_referral_inviter_bonus',
+              params: {
+                'p_inviter_id': referredById,
+                'p_new_user_id': newUserId,
+              },
+            );
+          } catch (_) {}
+        }
 
         // Guardar registro inicial en la tabla correspondiente
         if (_role == UserRole.restaurant) {
@@ -361,20 +378,6 @@ class _AuthScreenState extends State<AuthScreen> {
             border: OutlineInputBorder(),
           ),
         ),
-        const SizedBox(height: 16),
-        TextField(
-          controller: _regReferralCodeCtrl,
-          textCapitalization: TextCapitalization.characters,
-          decoration: InputDecoration(
-            labelText: 'Código de invitación (Opcional • Solo cuentas nuevas)',
-            hintText: _role == UserRole.restaurant
-                ? 'Ej. ABA-9F2A (de un Distribuidor)'
-                : 'Ej. ABA-4C1B (de un Restaurante)',
-            helperText: 'Válido únicamente la primera vez que te registras en Abasto.',
-            prefixIcon: const Icon(Icons.card_giftcard_outlined),
-            border: const OutlineInputBorder(),
-          ),
-        ),
         const SizedBox(height: 24),
         SizedBox(
           height: 50,
@@ -453,6 +456,20 @@ class _AuthScreenState extends State<AuthScreen> {
             labelText: 'Contraseña (mínimo 6 caracteres)',
             prefixIcon: Icon(Icons.lock_outline),
             border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _regReferralCodeCtrl,
+          textCapitalization: TextCapitalization.characters,
+          decoration: InputDecoration(
+            labelText: 'Código de invitación (Opcional • Solo cuentas nuevas)',
+            hintText: _role == UserRole.restaurant
+                ? 'Ej. ABA-9F2A (de un Distribuidor)'
+                : 'Ej. ABA-4C1B (de un Restaurante)',
+            helperText: 'Válido únicamente la primera vez que te registras en Abasto.',
+            prefixIcon: const Icon(Icons.card_giftcard_outlined),
+            border: const OutlineInputBorder(),
           ),
         ),
         const SizedBox(height: 24),
