@@ -548,8 +548,15 @@ class _SupplierIncomingOrdersScreenState
           'note': 'Actualizado por distribuidor',
         });
 
+      final existingPin = (order['delivery_pin'] ?? '').toString().trim();
+      final String? pinToSave =
+          (newStatus.toLowerCase() == 'enruta' && existingPin.length != 4)
+              ? (1000 + (DateTime.now().millisecondsSinceEpoch % 9000)).toString()
+              : (existingPin.length == 4 ? existingPin : null);
+
       await supabase.from('orders').update({
         'status': newStatus,
+        if (pinToSave != null) 'delivery_pin': pinToSave,
         'status_history': newHistory,
       }).eq('id', orderId);
 
@@ -570,6 +577,362 @@ class _SupplierIncomingOrdersScreenState
             content: Text('Error al cambiar estado: $e'),
             backgroundColor: Colors.red,
           ),
+        );
+      }
+    }
+  }
+
+  Future<void> _showFeaturedPlanModal() async {
+    bool isFeatured = false;
+    DateTime? featuredUntil;
+    try {
+      final det = await supabase
+          .from('supplier_details')
+          .select('is_featured, featured_until')
+          .eq('profile_id', _currentUserId)
+          .maybeSingle();
+      if (det != null) {
+        isFeatured = det['is_featured'] == true;
+        if (det['featured_until'] != null) {
+          featuredUntil = DateTime.tryParse(det['featured_until'].toString());
+        }
+      }
+    } catch (_) {}
+
+    final now = DateTime.now();
+    final localUntil = featuredUntil?.toLocal();
+    final bool activeNow =
+        isFeatured && (localUntil == null || localUntil.isAfter(now));
+    final Duration remaining = (activeNow && localUntil != null)
+        ? localUntil.difference(now)
+        : Duration.zero;
+    final int daysLeft = remaining.inDays.clamp(0, 365);
+    final int hoursLeft = remaining.inHours % 24;
+
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF001A2C),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.bolt_rounded,
+                          color: AppColors.tealMint, size: 22),
+                    ),
+                    const SizedBox(width: 10),
+                    const Text(
+                      'Distribuidor Destacado',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.navyDark,
+                      ),
+                    ),
+                  ],
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(ctx),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            if (activeNow) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFECFDF5),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFA7F3D0)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '✅ Plan Visibilidad Activo',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF047857),
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      () {
+                        if (localUntil == null) {
+                          return 'Tu distribuidora cuenta con posicionamiento Destacado vigente.';
+                        }
+                        final dateStr =
+                            '${localUntil.day.toString().padLeft(2, '0')}/${localUntil.month.toString().padLeft(2, '0')}/${localUntil.year}';
+                        final hour12 = localUntil.hour > 12
+                            ? localUntil.hour - 12
+                            : (localUntil.hour == 0 ? 12 : localUntil.hour);
+                        final ampm = localUntil.hour >= 12 ? 'PM' : 'AM';
+                        final timeStr =
+                            '$hour12:${localUntil.minute.toString().padLeft(2, '0')} $ampm';
+                        final remStr = daysLeft > 0
+                            ? '$daysLeft ${daysLeft == 1 ? 'día' : 'días'} y $hoursLeft ${hoursLeft == 1 ? 'hora' : 'horas'} restantes'
+                            : '$hoursLeft ${hoursLeft == 1 ? 'hora' : 'horas'} restantes';
+                        return 'Vence el $dateStr a las $timeStr ($remStr).';
+                      }(),
+                      style: const TextStyle(
+                        color: Color(0xFF065F46),
+                        fontSize: 12.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Si renuevas ahora, se sumarán +30 días adicionales a partir de tu fecha de vencimiento actual sin perder días.',
+                style: TextStyle(fontSize: 12.5, color: AppColors.subtitleGrey),
+              ),
+            ] else ...[
+              const Text(
+                'Aumenta tus pedidos apareciendo en los primeros lugares del catálogo y en el Comparador de Precios B2B.',
+                style: TextStyle(
+                    fontSize: 13, color: Color(0xFF334155), height: 1.4),
+              ),
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Plan Visibilidad 30 Días',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                            color: AppColors.navyDark,
+                          ),
+                        ),
+                        Text(
+                          '\$25.00 / mes',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 17,
+                            color: AppColors.primaryBlue,
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 8),
+                    Text('✓ Posición #1–#2 en tu zona y categoría',
+                        style: TextStyle(fontSize: 12.5)),
+                    SizedBox(height: 3),
+                    Text('✓ Insignia "Destacado" y borde resaltado',
+                        style: TextStyle(fontSize: 12.5)),
+                    SizedBox(height: 3),
+                    Text('✓ Prioridad en el Comparador de Precios',
+                        style: TextStyle(fontSize: 12.5)),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF001A2C),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                icon: const Icon(Icons.lock_outline,
+                    size: 18, color: AppColors.tealMint),
+                label: Text(
+                  activeNow
+                      ? 'Renovar +30 Días con Wompi (\$25.00)'
+                      : 'Pagar \$25.00 con Tarjeta (Wompi)',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _payFeaturedPlanWithWompi(currentUntil: featuredUntil);
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              height: 40,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF0F766E),
+                  side: const BorderSide(color: Color(0xFF0F766E)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                icon: const Icon(Icons.chat, size: 17),
+                label: Text(
+                  activeNow
+                      ? 'Renovar por WhatsApp'
+                      : 'Solicitar activación por WhatsApp',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 12.5),
+                ),
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  final msg = Uri.encodeComponent(
+                    activeNow
+                        ? 'Hola equipo de Abasto, quiero renovar por 30 días más mi Plan Distribuidor Destacado (\$25).'
+                        : 'Hola equipo de Abasto, quiero activar el Plan Distribuidor Destacado (\$25/mes) para mi empresa.',
+                  );
+                  html.window
+                      .open('https://wa.me/50360376012?text=$msg', '_blank');
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _payFeaturedPlanWithWompi({DateTime? currentUntil}) async {
+    final promoCode =
+        'FEAT-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
+    try {
+      final userEmail =
+          supabase.auth.currentUser?.email ?? 'distribuidor@abasto.sv';
+      final response = await supabase.functions.invoke(
+        'create-wompi-payment',
+        body: {
+          'orderId': _currentUserId,
+          'orderCode': promoCode,
+          'amount': 25.00,
+          'customerEmail': userEmail,
+        },
+      );
+
+      final data = response.data;
+      if (response.status != 200 || data == null || data['url'] == null) {
+        throw Exception(data?['error'] ?? 'No se pudo generar el enlace');
+      }
+
+      final String paymentUrl = data['url'];
+      final String viewId =
+          'wompi-feat-${DateTime.now().millisecondsSinceEpoch}';
+
+      ui_web.platformViewRegistry.registerViewFactory(viewId, (int id) {
+        return html.IFrameElement()
+          ..src = paymentUrl
+          ..style.border = 'none'
+          ..style.width = '100%'
+          ..style.height = '100%'
+          ..allow = 'payment *';
+      });
+
+      if (!mounted) return;
+      final sub = html.window.onMessage.listen((event) async {
+        final msg = event.data;
+        if (msg is Map &&
+            msg['type'] == 'WOMPI_PAYMENT_APPROVED' &&
+            msg['orderCode'] == promoCode) {
+          final now = DateTime.now();
+          final baseDate = (currentUntil != null && currentUntil.isAfter(now))
+              ? currentUntil
+              : now;
+          final untilIso =
+              baseDate.add(const Duration(days: 30)).toUtc().toIso8601String();
+          await supabase.from('supplier_details').update({
+            'is_featured': true,
+            'featured_until': untilIso,
+          }).eq('profile_id', _currentUserId);
+
+          if (mounted) {
+            Navigator.of(context, rootNavigator: true).pop();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                    '¡Pago aprobado! Tu distribuidora ya está Destacada por 30 días.'),
+                backgroundColor: AppColors.tealMint,
+              ),
+            );
+          }
+        }
+      });
+
+      await showDialog(
+        context: context,
+        builder: (ctx) => Dialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          clipBehavior: Clip.antiAlias,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 500,
+              maxHeight: MediaQuery.of(ctx).size.height * 0.85,
+            ),
+            child: Column(
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  color: AppColors.navyDark,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Plan Distribuidor Destacado (\$25.00)',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13.5),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(child: HtmlElementView(viewType: viewId)),
+              ],
+            ),
+          ),
+        ),
+      );
+      await sub.cancel();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Error iniciando pago: $e'),
+              backgroundColor: Colors.red),
         );
       }
     }
@@ -675,9 +1038,40 @@ class _SupplierIncomingOrdersScreenState
                 'Retención Abasto por pedido: 5%',
                 style: TextStyle(color: Color(0xFFCBD5E1), fontSize: 11.5),
               ),
-              Row(
-                mainAxisSize: MainAxisSize.min,
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
                 children: [
+                  InkWell(
+                    onTap: _showFeaturedPlanModal,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.tealMint.withOpacity(0.18),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                            color: AppColors.tealMint.withOpacity(0.5)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: const [
+                          Icon(Icons.bolt_rounded,
+                              color: AppColors.tealMint, size: 14),
+                          SizedBox(width: 4),
+                          Text(
+                            'Destacar Tienda',
+                            style: TextStyle(
+                              color: AppColors.tealMint,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                   InkWell(
                     onTap: _showDriverAccessCodeDialog,
                     borderRadius: BorderRadius.circular(6),
@@ -2657,62 +3051,106 @@ class _SupplierIncomingOrdersScreenState
         backgroundColor: const Color(0xFF001A2C),
         foregroundColor: Colors.white,
         elevation: 0,
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: AppColors.tealMint.withOpacity(0.16),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.local_shipping_rounded,
-                  color: AppColors.tealMint, size: 19),
-            ),
-            const SizedBox(width: 10),
-            const Text(
-              'Despacho de Pedidos',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-            ),
-          ],
+        titleSpacing: 12,
+        title: Builder(
+          builder: (context) {
+            final isCompact = MediaQuery.of(context).size.width < 430;
+            return Row(
+              children: [
+                Container(
+                  padding: EdgeInsets.all(isCompact ? 5 : 6),
+                  decoration: BoxDecoration(
+                    color: AppColors.tealMint.withOpacity(0.16),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(Icons.local_shipping_rounded,
+                      color: AppColors.tealMint, size: isCompact ? 17 : 19),
+                ),
+                SizedBox(width: isCompact ? 7 : 10),
+                Flexible(
+                  child: Text(
+                    isCompact ? 'Despachos' : 'Despacho de Pedidos',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: isCompact ? 15.5 : 18,
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
         ),
         actions: [
-          IconButton(
-            tooltip: 'Código de Acceso para Motoristas',
-            icon: const Icon(Icons.badge_outlined, color: AppColors.tealMint),
-            onPressed: _showDriverAccessCodeDialog,
-          ),
-          Container(
-            margin: const EdgeInsets.symmetric(vertical: 8),
-            child: TextButton.icon(
-              style: TextButton.styleFrom(
-                backgroundColor: Colors.white.withOpacity(0.10),
-                foregroundColor: AppColors.tealMint,
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-              ),
-              onPressed: () =>
-                  InteractiveTutorialModal.show(context, isSupplier: true),
-              icon: const Icon(Icons.help_outline_rounded, size: 17),
-              label: const Text(
-                'Tutorial',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12.5,
-                ),
-              ),
-            ),
-          ),
-          IconButton(
-            tooltip: 'Exportar Ventas Contabilidad (CSV)',
-            icon: const Icon(Icons.download_rounded),
-            onPressed: _exportSupplierSalesCsv,
-          ),
-          IconButton(
-            tooltip: 'Actualizar',
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: _refresh,
+          Builder(
+            builder: (context) {
+              final isCompact = MediaQuery.of(context).size.width < 430;
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: 'Código de Acceso para Motoristas',
+                    padding: EdgeInsets.symmetric(horizontal: isCompact ? 4 : 8),
+                    constraints: const BoxConstraints(),
+                    icon: Icon(Icons.badge_outlined,
+                        color: AppColors.tealMint, size: isCompact ? 20 : 22),
+                    onPressed: _showDriverAccessCodeDialog,
+                  ),
+                  if (isCompact)
+                    IconButton(
+                      tooltip: 'Tutorial',
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      constraints: const BoxConstraints(),
+                      icon: const Icon(Icons.help_outline_rounded,
+                          color: AppColors.tealMint, size: 20),
+                      onPressed: () => InteractiveTutorialModal.show(context,
+                          isSupplier: true),
+                    )
+                  else
+                    Container(
+                      margin: const EdgeInsets.symmetric(vertical: 8),
+                      child: TextButton.icon(
+                        style: TextButton.styleFrom(
+                          backgroundColor: Colors.white.withOpacity(0.10),
+                          foregroundColor: AppColors.tealMint,
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                        ),
+                        onPressed: () => InteractiveTutorialModal.show(context,
+                            isSupplier: true),
+                        icon: const Icon(Icons.help_outline_rounded, size: 17),
+                        label: const Text(
+                          'Tutorial',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                  IconButton(
+                    tooltip: 'Exportar Ventas Contabilidad (CSV)',
+                    padding: EdgeInsets.symmetric(horizontal: isCompact ? 4 : 8),
+                    constraints: const BoxConstraints(),
+                    icon: Icon(Icons.download_rounded,
+                        size: isCompact ? 20 : 22),
+                    onPressed: _exportSupplierSalesCsv,
+                  ),
+                  IconButton(
+                    tooltip: 'Actualizar',
+                    padding: EdgeInsets.only(
+                        left: isCompact ? 4 : 8, right: isCompact ? 8 : 12),
+                    constraints: const BoxConstraints(),
+                    icon:
+                        Icon(Icons.refresh_rounded, size: isCompact ? 20 : 22),
+                    onPressed: _refresh,
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),

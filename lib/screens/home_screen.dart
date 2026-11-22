@@ -369,6 +369,12 @@ class _HomeScreenState extends State<HomeScreen> {
       return Supplier.fromMap(map);
     }).toList();
 
+    list.sort((a, b) {
+      if (a.isCurrentlyFeatured && !b.isCurrentlyFeatured) return -1;
+      if (!a.isCurrentlyFeatured && b.isCurrentlyFeatured) return 1;
+      return b.rating.compareTo(a.rating);
+    });
+
     _allSuppliers = list;
     _filteredSuppliers = list;
     return list;
@@ -416,6 +422,14 @@ class _HomeScreenState extends State<HomeScreen> {
         if (aSameZone && !bSameZone) return -1;
         if (!aSameZone && bSameZone) return 1;
         return 0;
+      });
+    }
+
+    if (!_sortByNearest) {
+      filtered.sort((a, b) {
+        if (a.isCurrentlyFeatured && !b.isCurrentlyFeatured) return -1;
+        if (!a.isCurrentlyFeatured && b.isCurrentlyFeatured) return 1;
+        return b.rating.compareTo(a.rating);
       });
     }
 
@@ -695,11 +709,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildSupplierCard(Supplier supplier) {
+    final bool featured = supplier.isCurrentlyFeatured;
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(
+          color: featured ? AppColors.tealMint : const Color(0xFFE2E8F0),
+          width: featured ? 1.6 : 1.0,
+        ),
         boxShadow: [
           BoxShadow(
             color: const Color(0xFF0F172A).withOpacity(0.04),
@@ -804,21 +822,53 @@ class _HomeScreenState extends State<HomeScreen> {
                             ],
                           ),
                           const SizedBox(height: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 9, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: AppColors.primaryBlue.withOpacity(0.08),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              supplier.category,
-                              style: const TextStyle(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.primaryBlue,
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 9, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: AppColors.primaryBlue.withOpacity(0.08),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  supplier.category,
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.primaryBlue,
+                                  ),
+                                ),
                               ),
-                            ),
+                              if (featured)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF001A2C),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: const [
+                                      Icon(Icons.bolt_rounded,
+                                          size: 12, color: AppColors.tealMint),
+                                      SizedBox(width: 3),
+                                      Text(
+                                        'Destacado',
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.bold,
+                                          color: AppColors.tealMint,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
                           ),
                         ],
                       ),
@@ -936,8 +986,13 @@ class _HomeScreenState extends State<HomeScreen> {
           });
         }
 
-        enriched.sort((a, b) =>
-            (a['final_price'] as double).compareTo(b['final_price'] as double));
+        enriched.sort((a, b) {
+          final suppA = a['supplier'] as Supplier;
+          final suppB = b['supplier'] as Supplier;
+          if (suppA.isCurrentlyFeatured && !suppB.isCurrentlyFeatured) return -1;
+          if (!suppA.isCurrentlyFeatured && suppB.isCurrentlyFeatured) return 1;
+          return (a['final_price'] as double).compareTo(b['final_price'] as double);
+        });
 
         setModalState(() {
           results = enriched;
@@ -1073,7 +1128,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                     final tiers =
                                         (item['bulk_tiers'] as List<dynamic>?) ??
                                             [];
-                                    final isBest = idx == 0;
+                                    final double minPrice = results
+                                        .map((r) => r['final_price'] as double)
+                                        .reduce((a, b) => a < b ? a : b);
+                                    final bool isBest = finalPrice <= minPrice;
+                                    final bool isFeaturedSupp =
+                                        supp.isCurrentlyFeatured;
 
                                     return Container(
                                       padding: const EdgeInsets.all(14),
@@ -1085,7 +1145,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                         border: Border.all(
                                           color: isBest
                                               ? const Color(0xFF86EFAC)
-                                              : const Color(0xFFE2E8F0),
+                                              : (isFeaturedSupp
+                                                  ? AppColors.tealMint
+                                                  : const Color(0xFFE2E8F0)),
+                                          width: isFeaturedSupp ? 1.5 : 1.0,
                                         ),
                                       ),
                                       child: Row(
@@ -1095,30 +1158,87 @@ class _HomeScreenState extends State<HomeScreen> {
                                               crossAxisAlignment:
                                                   CrossAxisAlignment.start,
                                               children: [
-                                                if (isBest)
-                                                  Container(
-                                                    margin:
+                                                if (isFeaturedSupp || isBest)
+                                                  Padding(
+                                                    padding:
                                                         const EdgeInsets.only(
                                                             bottom: 4),
-                                                    padding: const EdgeInsets
-                                                        .symmetric(
-                                                        horizontal: 7,
-                                                        vertical: 2),
-                                                    decoration: BoxDecoration(
-                                                      color: const Color(
-                                                          0xFF16A34A),
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              6),
-                                                    ),
-                                                    child: const Text(
-                                                      'MEJOR PRECIO',
-                                                      style: TextStyle(
-                                                        color: Colors.white,
-                                                        fontSize: 9.5,
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                      ),
+                                                    child: Wrap(
+                                                      spacing: 5,
+                                                      runSpacing: 4,
+                                                      children: [
+                                                        if (isFeaturedSupp)
+                                                          Container(
+                                                            padding: const EdgeInsets
+                                                                .symmetric(
+                                                                horizontal: 7,
+                                                                vertical: 2),
+                                                            decoration:
+                                                                BoxDecoration(
+                                                              color: const Color(
+                                                                  0xFF001A2C),
+                                                              borderRadius:
+                                                                  BorderRadius
+                                                                      .circular(
+                                                                          6),
+                                                            ),
+                                                            child: Row(
+                                                              mainAxisSize:
+                                                                  MainAxisSize
+                                                                      .min,
+                                                              children: const [
+                                                                Icon(
+                                                                    Icons
+                                                                        .bolt_rounded,
+                                                                    size: 11,
+                                                                    color: AppColors
+                                                                        .tealMint),
+                                                                SizedBox(
+                                                                    width: 2),
+                                                                Text(
+                                                                  'DESTACADO',
+                                                                  style:
+                                                                      TextStyle(
+                                                                    color: AppColors
+                                                                        .tealMint,
+                                                                    fontSize:
+                                                                        9.5,
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .bold,
+                                                                  ),
+                                                                ),
+                                                              ],
+                                                            ),
+                                                          ),
+                                                        if (isBest)
+                                                          Container(
+                                                            padding: const EdgeInsets
+                                                                .symmetric(
+                                                                horizontal: 7,
+                                                                vertical: 2),
+                                                            decoration:
+                                                                BoxDecoration(
+                                                              color: const Color(
+                                                                  0xFF16A34A),
+                                                              borderRadius:
+                                                                  BorderRadius
+                                                                      .circular(
+                                                                          6),
+                                                            ),
+                                                            child: const Text(
+                                                              'MEJOR PRECIO',
+                                                              style: TextStyle(
+                                                                color: Colors
+                                                                    .white,
+                                                                fontSize: 9.5,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .bold,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                      ],
                                                     ),
                                                   ),
                                                 Text(

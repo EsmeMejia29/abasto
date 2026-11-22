@@ -53,6 +53,15 @@ class Supplier {
   final String deliveryCoverage;
   final double? latitude;
   final double? longitude;
+  final bool isFeatured;
+  final DateTime? featuredUntil;
+  final String featuredTagline;
+
+  bool get isCurrentlyFeatured {
+    if (!isFeatured) return false;
+    if (featuredUntil == null) return true;
+    return featuredUntil!.isAfter(DateTime.now());
+  }
 
   const Supplier({
     required this.id,
@@ -69,11 +78,14 @@ class Supplier {
     this.website,
     this.nrcNit,
     this.businessHours = 'Lunes a Sábado: 7:00 AM - 5:00 PM',
-    this.isVerified = true,
+    this.isVerified = false,
     this.description,
     this.deliveryCoverage = '',
     this.latitude,
     this.longitude,
+    this.isFeatured = false,
+    this.featuredUntil,
+    this.featuredTagline = '',
   });
 
   factory Supplier.fromMap(Map<String, dynamic> map) {
@@ -94,11 +106,16 @@ class Supplier {
       website: map['website'] as String?,
       nrcNit: map['nrc_nit'] as String?,
       businessHours: map['business_hours'] ?? 'Lunes a Sábado: 7:00 AM - 5:00 PM',
-      isVerified: map['is_verified'] ?? true,
+      isVerified: map['is_verified'] ?? false,
       description: map['description'] as String?,
       deliveryCoverage: (map['delivery_coverage'] ?? '').toString(),
       latitude: latRaw != null ? double.tryParse(latRaw.toString()) : null,
       longitude: lngRaw != null ? double.tryParse(lngRaw.toString()) : null,
+      isFeatured: map['is_featured'] == true,
+      featuredUntil: map['featured_until'] != null
+          ? DateTime.tryParse(map['featured_until'].toString())
+          : null,
+      featuredTagline: (map['featured_tagline'] ?? '').toString().trim(),
     );
   }
 }

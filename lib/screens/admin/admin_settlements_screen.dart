@@ -109,12 +109,23 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
       for (var r in restaurants) r['id'].toString(): r['business_name']?.toString() ?? 'Restaurante'
     };
 
-    // 2. Traer información complementaria de restaurant_details
+    // 2. Traer información complementaria de restaurant_details y supplier_details
     Map<String, Map<String, dynamic>> restaurantDetailsMap = {};
     try {
       final restDetailsRes = await supabase.from('restaurant_details').select('*');
       for (var rd in (restDetailsRes as List<dynamic>)) {
         restaurantDetailsMap[rd['profile_id'].toString()] = rd as Map<String, dynamic>;
+      }
+    } catch (_) {}
+
+    Map<String, Map<String, dynamic>> supplierDetailsMap = {};
+    try {
+      final suppDetailsRes = await supabase
+          .from('supplier_details')
+          .select('profile_id, is_featured, featured_until');
+      for (var sd in (suppDetailsRes as List<dynamic>)) {
+        supplierDetailsMap[sd['profile_id'].toString()] =
+            Map<String, dynamic>.from(sd as Map);
       }
     } catch (_) {}
 
@@ -405,7 +416,14 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
 
     final allCommerces = allProfiles
         .where((p) => p['role'] == 'supplier' || p['role'] == 'restaurant')
-        .toList();
+        .map((p) {
+      final det = supplierDetailsMap[p['id'].toString()];
+      return {
+        ...p,
+        'is_featured': det?['is_featured'] == true,
+        'featured_until': det?['featured_until'],
+      };
+    }).toList();
 
     List<dynamic> allChatMessages = [];
     try {
@@ -2219,6 +2237,44 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
     }
   }
 
+  Future<void> _toggleSupplierFeatured(
+      String supplierId, String name, bool currentlyFeatured) async {
+    try {
+      final nextState = !currentlyFeatured;
+      final untilIso = nextState
+          ? DateTime.now()
+              .add(const Duration(days: 30))
+              .toUtc()
+              .toIso8601String()
+          : null;
+
+      await supabase.from('supplier_details').update({
+        'is_featured': nextState,
+        'featured_until': untilIso,
+      }).eq('profile_id', supplierId);
+
+      _refresh();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(nextState
+                ? '$name ahora es Distribuidor Destacado por 30 días'
+                : 'Se desactivó el espacio Destacado de $name'),
+            backgroundColor: nextState ? AppColors.tealMint : Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Error actualizando destacado: $e'),
+              backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   // --- SECCIÓN 3: VERIFICACIÓN DE COMERCIOS Y BONOS PROMOCIONALES ---
   Widget _buildCommercesTab(Map<String, dynamic> data, bool isDesktop) {
     final allCommerces = (data['allCommerces'] as List<Map<String, dynamic>>? ?? []);
@@ -2311,7 +2367,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
         _buildResponsiveCardGrid(
           items: filtered,
           isDesktop: isDesktop,
-          desktopExtent: 215,
+          desktopExtent: 265,
           itemBuilder: (c) {
             final isSupplier = c['role'] == 'supplier';
             final isVerified = c['is_verified'] == true;
@@ -2430,7 +2486,7 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            'Bonos 0% comisión: $credits',
+                            'Pedidos sin comisión disponibles: $credits',
                             style: const TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
@@ -2463,6 +2519,53 @@ class _AdminSettlementsScreenState extends State<AdminSettlementsScreen> {
                         ],
                       ),
                     ),
+                    if (isSupplier) ...[
+                      const SizedBox(height: 8),
+                      Builder(
+                        builder: (_) {
+                          final until = c['featured_until'] != null
+                              ? DateTime.tryParse(
+                                  c['featured_until'].toString())
+                              : null;
+                          final isFeaturedActive = c['is_featured'] == true &&
+                              (until == null || until.isAfter(DateTime.now()));
+                          return SizedBox(
+                            width: double.infinity,
+                            height: 34,
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                backgroundColor: isFeaturedActive
+                                    ? const Color(0xFF001A2C)
+                                    : Colors.white,
+                                foregroundColor: isFeaturedActive
+                                    ? AppColors.tealMint
+                                    : AppColors.navyDark,
+                                side: BorderSide(
+                                  color: isFeaturedActive
+                                      ? AppColors.tealMint
+                                      : const Color(0xFFCBD5E1),
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              icon: const Icon(Icons.bolt_rounded, size: 16),
+                              label: Text(
+                                isFeaturedActive
+                                    ? 'Destacado Activo (30d) • Desactivar'
+                                    : 'Activar Destacado (30 días)',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              onPressed: () => _toggleSupplierFeatured(
+                                  c['id'].toString(), name, isFeaturedActive),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
                   ],
                 ),
               ),

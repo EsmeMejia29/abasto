@@ -217,7 +217,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         'economic_activity': _economicActivityCtrl.text.trim(),
         'nrc_nit': combinedLegacy,
         'business_hours': _hoursCtrl.text.trim(),
-        'is_verified': true,
+        'is_verified': false, // Cambiado a false para que el administrador verifique manualmente
       }).eq('id', _currentUserId);
 
       if (mounted) {
