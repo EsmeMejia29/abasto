@@ -18,6 +18,7 @@ import '../../utils/csv_exporter.dart';
 import '../../widgets/interactive_tutorial_modal.dart';
 
 import '../../utils/app_badge_service.dart';
+import '../../widgets/tutorial_coach_tooltip.dart';
 
 class SupplierIncomingOrdersScreen extends StatefulWidget {
   const SupplierIncomingOrdersScreen({super.key});
@@ -29,6 +30,7 @@ class SupplierIncomingOrdersScreen extends StatefulWidget {
 
 class _SupplierIncomingOrdersScreenState
     extends State<SupplierIncomingOrdersScreen> {
+  final GlobalKey _supplierTutorialBtnKey = GlobalKey();
   RealtimeChannel? _ordersSubscription;
   RealtimeChannel? _payoutsSubscription;
   RealtimeChannel? _messagesSubscription;
@@ -3099,6 +3101,7 @@ class _SupplierIncomingOrdersScreenState
                   ),
                   if (isCompact)
                     IconButton(
+                      key: _supplierTutorialBtnKey,
                       tooltip: 'Tutorial',
                       padding: const EdgeInsets.symmetric(horizontal: 4),
                       constraints: const BoxConstraints(),
@@ -3109,6 +3112,7 @@ class _SupplierIncomingOrdersScreenState
                     )
                   else
                     Container(
+                      key: _supplierTutorialBtnKey,
                       margin: const EdgeInsets.symmetric(vertical: 8),
                       child: TextButton.icon(
                         style: TextButton.styleFrom(
@@ -3154,7 +3158,9 @@ class _SupplierIncomingOrdersScreenState
           ),
         ],
       ),
-      body: FutureBuilder<List<Map<String, dynamic>>>(
+      body: Stack(
+        children: [
+          FutureBuilder<List<Map<String, dynamic>>>(
         future: _ordersFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -3313,6 +3319,12 @@ class _SupplierIncomingOrdersScreenState
             ),
           );
         },
+      ),
+          TutorialCoachTooltip(
+            targetKey: _supplierTutorialBtnKey,
+            storageKey: 'abasto_tutorial_coach_supplier_v1',
+          ),
+        ],
       ),
     );
   }

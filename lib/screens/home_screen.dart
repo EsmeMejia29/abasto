@@ -9,6 +9,7 @@ import '../services/notification_service.dart';
 import 'supplier_detail_screen.dart';
 import '../widgets/business_info_sheet.dart';
 import '../widgets/interactive_tutorial_modal.dart';
+import '../widgets/tutorial_coach_tooltip.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -28,6 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
   double? _userLat;
   double? _userLng;
   final TextEditingController _searchCtrl = TextEditingController();
+  final GlobalKey _tutorialBtnKey = GlobalKey();
 
   String _restaurantName = 'Mi Restaurante';
   String _restaurantLocation = '';
@@ -562,6 +564,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           SizedBox(width: isCompact ? 4 : 6),
                           TextButton.icon(
+                            key: _tutorialBtnKey,
                             style: TextButton.styleFrom(
                               backgroundColor: Colors.white.withOpacity(0.10),
                               foregroundColor: AppColors.tealMint,
@@ -1387,8 +1390,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
         return Scaffold(
           backgroundColor: const Color(0xFFF1F5F9),
-          body: SafeArea(
-            child: Column(
+          body: Stack(
+            children: [
+              SafeArea(
+                child: Column(
               children: [
                 _buildHeroHeader(isDesktop),
 
@@ -1653,8 +1658,14 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ),
-          ),
-        );
+        ),
+        TutorialCoachTooltip(
+          targetKey: _tutorialBtnKey,
+          storageKey: 'abasto_tutorial_coach_restaurant_v1',
+        ),
+      ],
+    ),
+  );
       },
     );
   }
