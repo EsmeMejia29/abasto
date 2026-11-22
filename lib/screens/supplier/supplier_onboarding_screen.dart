@@ -271,6 +271,7 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
       _initialProducts.add({
         'category': defaultCat,
         'name': TextEditingController(),
+        'description': TextEditingController(),
         'unit': TextEditingController(text: 'Caja 50 lb'),
         'price': TextEditingController(),
         'image_url': TextEditingController(),
@@ -285,6 +286,7 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
       setState(() {
         final row = _initialProducts.removeAt(index);
         (row['name'] as TextEditingController).dispose();
+        (row['description'] as TextEditingController).dispose();
         (row['unit'] as TextEditingController).dispose();
         (row['price'] as TextEditingController).dispose();
         (row['image_url'] as TextEditingController).dispose();
@@ -458,6 +460,13 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
               (row['image_url'] as TextEditingController).text.trim();
 
           if (name.isNotEmpty) {
+            final resolvedUnit = unit.isEmpty ? 'unidad' : unit;
+            final rawDesc =
+                (row['description'] as TextEditingController).text.trim();
+            final finalDescription = rawDesc.isNotEmpty
+                ? rawDesc
+                : '$name en presentación de $resolvedUnit. Insumo seleccionado para abastecimiento de restaurantes.';
+
             final rawTiers = (row['bulk_tiers'] as List<dynamic>?) ?? [];
             final List<dynamic> parsedTiers = [];
             for (final tc in rawTiers) {
@@ -481,7 +490,8 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
               'supplier_id': userId,
               'category': cat,
               'name': name,
-              'unit': unit.isEmpty ? 'unidad' : unit,
+              'description': finalDescription,
+              'unit': resolvedUnit,
               'price': price,
               'bulk_tiers': parsedTiers,
               'image_url': imgUrl.isNotEmpty ? imgUrl : null,
@@ -1214,8 +1224,20 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: row['description'] as TextEditingController,
+                      maxLines: 2,
+                      decoration: const InputDecoration(
+                        labelText: 'Descripción del insumo (Opcional)',
+                        hintText:
+                            'Si lo dejas vacío, se generará una descripción estándar automáticamente',
+                        isDense: true,
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
                     const SizedBox(height: 12),
-
+                    
                     Row(
                       children: [
                         if (hasImage) ...[

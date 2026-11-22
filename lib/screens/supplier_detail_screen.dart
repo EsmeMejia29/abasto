@@ -1196,6 +1196,68 @@ Widget _buildCartBody({
     );
   }
 
+  void _showFullScreenProductImage(String imageUrl, String title) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.9),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(14),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            InteractiveViewer(
+              minScale: 0.8,
+              maxScale: 4.5,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: Image.network(
+                  imageUrl,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const Icon(
+                    Icons.broken_image_outlined,
+                    color: Colors.white,
+                    size: 56,
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 8,
+              left: 12,
+              right: 54,
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  shadows: [Shadow(blurRadius: 6, color: Colors.black)],
+                ),
+              ),
+            ),
+            Positioned(
+              top: 4,
+              right: 4,
+              child: Material(
+                color: Colors.black.withOpacity(0.65),
+                shape: const CircleBorder(),
+                child: IconButton(
+                  tooltip: 'Cerrar',
+                  icon: const Icon(Icons.close_rounded,
+                      color: Colors.white, size: 22),
+                  onPressed: () => Navigator.pop(ctx),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _openProductDetailModal(Product product) {
     final bool isDesktop = MediaQuery.of(context).size.width >= 850;
     final int? maxStock = _productStocks[product.id];
@@ -1215,34 +1277,74 @@ Widget _buildCartBody({
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Imagen superior con botón de cerrar y badge de categoría
+            // Imagen superior clicable para ver en tamaño completo + botón de cerrar y badge de categoría
             Stack(
               children: [
-                ClipRRect(
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(20),
-                  ),
-                  child: SizedBox(
-                    height: isDesktop ? 240 : 210,
-                    width: double.infinity,
-                    child: (product.imageUrl != null &&
-                            product.imageUrl!.isNotEmpty)
-                        ? Image.network(
+                GestureDetector(
+                  onTap: (product.imageUrl != null &&
+                          product.imageUrl!.isNotEmpty)
+                      ? () => _showFullScreenProductImage(
                             product.imageUrl!,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
+                            product.name,
+                          )
+                      : null,
+                  child: ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(20),
+                    ),
+                    child: SizedBox(
+                      height: isDesktop ? 240 : 210,
+                      width: double.infinity,
+                      child: (product.imageUrl != null &&
+                              product.imageUrl!.isNotEmpty)
+                          ? Image.network(
+                              product.imageUrl!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Container(
+                                color: const Color(0xFFF1F5F9),
+                                child: const Icon(Icons.inventory_2_outlined,
+                                    size: 56, color: AppColors.primaryBlue),
+                              ),
+                            )
+                          : Container(
                               color: const Color(0xFFF1F5F9),
                               child: const Icon(Icons.inventory_2_outlined,
                                   size: 56, color: AppColors.primaryBlue),
                             ),
-                          )
-                        : Container(
-                            color: const Color(0xFFF1F5F9),
-                            child: const Icon(Icons.inventory_2_outlined,
-                                size: 56, color: AppColors.primaryBlue),
-                          ),
+                    ),
                   ),
                 ),
+                if (product.imageUrl != null && product.imageUrl!.isNotEmpty)
+                  Positioned(
+                    bottom: 10,
+                    right: 10,
+                    child: IgnorePointer(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 9, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.65),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            Icon(Icons.zoom_in_rounded,
+                                color: Colors.white, size: 15),
+                            SizedBox(width: 4),
+                            Text(
+                              'Ver completa',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 Positioned(
                   top: 12,
                   left: 12,

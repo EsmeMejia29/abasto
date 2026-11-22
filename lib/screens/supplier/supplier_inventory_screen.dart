@@ -140,6 +140,7 @@ class _SupplierInventoryScreenState extends State<SupplierInventoryScreen> {
   // --- MODAL DE AGREGAR PRODUCTO CON IMAGEN ---
   Future<void> _showAddProductDialog() async {
     final nameCtrl = TextEditingController();
+    final descCtrl = TextEditingController();
     final catCtrl = TextEditingController(text: 'Lácteos y Quesos');
     final unitCtrl = TextEditingController(text: '1 litro');
     final priceCtrl = TextEditingController();
@@ -224,6 +225,16 @@ class _SupplierInventoryScreenState extends State<SupplierInventoryScreen> {
                 ),
                 const SizedBox(height: 10),
                 TextField(
+                  controller: descCtrl,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'Descripción (Opcional)',
+                    hintText: 'Vacío = se asignará descripción por defecto',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
                   controller: catCtrl,
                   decoration: const InputDecoration(
                     labelText: 'Categoría',
@@ -278,15 +289,22 @@ class _SupplierInventoryScreenState extends State<SupplierInventoryScreen> {
                         }
 
                         try {
+                          final resolvedUnit = unitCtrl.text.trim().isEmpty
+                              ? 'unidad'
+                              : unitCtrl.text.trim();
+                          final rawDesc = descCtrl.text.trim();
+                          final finalDescription = rawDesc.isNotEmpty
+                              ? rawDesc
+                              : '$name en presentación de $resolvedUnit. Insumo seleccionado para abastecimiento de restaurantes.';
+
                           await supabase.from('products').insert({
                             'supplier_id': _currentUserId,
                             'name': name,
+                            'description': finalDescription,
                             'category': catCtrl.text.trim().isEmpty
                                 ? 'General'
                                 : catCtrl.text.trim(),
-                            'unit': unitCtrl.text.trim().isEmpty
-                                ? 'unidad'
-                                : unitCtrl.text.trim(),
+                            'unit': resolvedUnit,
                             'price': price,
                             'image_url': uploadedImageUrl,
                             'is_available': true,
@@ -338,6 +356,8 @@ class _SupplierInventoryScreenState extends State<SupplierInventoryScreen> {
   // --- MODAL DE EDITAR PRODUCTO CON FOTO ---
   Future<void> _showEditProductDialog(Map<String, dynamic> product) async {
     final nameCtrl = TextEditingController(text: product['name'] ?? '');
+    final descCtrl =
+        TextEditingController(text: product['description'] ?? '');
     final catCtrl =
         TextEditingController(text: product['category'] ?? 'General');
     final unitCtrl = TextEditingController(text: product['unit'] ?? 'unidad');
@@ -462,6 +482,16 @@ class _SupplierInventoryScreenState extends State<SupplierInventoryScreen> {
                 ),
                 const SizedBox(height: 10),
                 TextField(
+                  controller: descCtrl,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'Descripción (Opcional)',
+                    hintText: 'Vacío = se asignará descripción por defecto',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
                   controller: catCtrl,
                   decoration: const InputDecoration(
                     labelText: 'Categoría',
@@ -519,10 +549,19 @@ class _SupplierInventoryScreenState extends State<SupplierInventoryScreen> {
                         }
 
                         try {
+                          final resolvedUnit = unitCtrl.text.trim().isEmpty
+                              ? 'unidad'
+                              : unitCtrl.text.trim();
+                          final rawDesc = descCtrl.text.trim();
+                          final finalDescription = rawDesc.isNotEmpty
+                              ? rawDesc
+                              : '$name en presentación de $resolvedUnit. Insumo seleccionado para abastecimiento de restaurantes.';
+
                           await supabase.from('products').update({
                             'name': name,
+                            'description': finalDescription,
                             'category': catCtrl.text.trim(),
-                            'unit': unitCtrl.text.trim(),
+                            'unit': resolvedUnit,
                             'price': price,
                             'image_url': finalImageUrl,
                           }).eq('id', product['id']);

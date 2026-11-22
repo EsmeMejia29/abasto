@@ -118,11 +118,70 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
     }
   }
 
+  void _showFullImageDialog({
+    Uint8List? imageBytes,
+    String? imageUrl,
+  }) {
+    if (imageBytes == null && (imageUrl == null || imageUrl.isEmpty)) return;
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.88),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(16),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            InteractiveViewer(
+              minScale: 0.8,
+              maxScale: 4.0,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: imageBytes != null
+                    ? Image.memory(
+                        imageBytes,
+                        fit: BoxFit.contain,
+                      )
+                    : Image.network(
+                        imageUrl!,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => const Icon(
+                          Icons.broken_image,
+                          color: Colors.white,
+                          size: 56,
+                        ),
+                      ),
+              ),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: Material(
+                color: Colors.black.withOpacity(0.65),
+                shape: const CircleBorder(),
+                child: IconButton(
+                  tooltip: 'Cerrar vista completa',
+                  icon: const Icon(Icons.close_rounded,
+                      color: Colors.white, size: 22),
+                  onPressed: () => Navigator.pop(ctx),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _openProductDialog({Map<String, dynamic>? productToEdit}) {
     final bool isEditing = productToEdit != null;
 
     final nameCtrl = TextEditingController(
       text: productToEdit?['name']?.toString() ?? '',
+    );
+    final descCtrl = TextEditingController(
+      text: productToEdit?['description']?.toString() ?? '',
     );
     final priceCtrl = TextEditingController(
       text: productToEdit != null
@@ -191,10 +250,13 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Center(
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(14),
-                        onTap: () async {
+                    Builder(
+                      builder: (_) {
+                        final bool hasAnyImage = pickedImageBytes != null ||
+                            (existingImageUrl != null &&
+                                existingImageUrl!.isNotEmpty);
+
+                        Future<void> pickNewPhoto() async {
                           final picker = ImagePicker();
                           final XFile? file = await picker.pickImage(
                             source: ImageSource.gallery,
@@ -207,58 +269,129 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
                               pickedImageName = file.name;
                             });
                           }
-                        },
-                        child: Container(
-                          width: 150,
-                          height: 150,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF1F5F9),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: AppColors.primaryBlue.withOpacity(0.35),
-                              width: 1.5,
-                            ),
-                          ),
-                          clipBehavior: Clip.antiAlias,
-                          child: pickedImageBytes != null
-                              ? Image.memory(pickedImageBytes!,
-                                  fit: BoxFit.cover)
-                              : (existingImageUrl != null &&
-                                      existingImageUrl!.isNotEmpty)
-                                  ? Image.network(
-                                      existingImageUrl!,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) =>
-                                          const Icon(Icons.broken_image),
-                                    )
-                                  : Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: const [
-                                        Icon(Icons.add_a_photo_outlined,
-                                            size: 38,
-                                            color: AppColors.primaryBlue),
-                                        SizedBox(height: 8),
-                                        Text(
-                                          'Subir Foto',
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w600,
-                                            color: AppColors.primaryBlue,
+                        }
+
+                        return Column(
+                          children: [
+                            Center(
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(14),
+                                onTap: hasAnyImage
+                                    ? () => _showFullImageDialog(
+                                          imageBytes: pickedImageBytes,
+                                          imageUrl: existingImageUrl,
+                                        )
+                                    : pickNewPhoto,
+                                child: Stack(
+                                  children: [
+                                    Container(
+                                      width: 170,
+                                      height: 170,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFF1F5F9),
+                                        borderRadius: BorderRadius.circular(14),
+                                        border: Border.all(
+                                          color: AppColors.primaryBlue
+                                              .withOpacity(0.35),
+                                          width: 1.5,
+                                        ),
+                                      ),
+                                      clipBehavior: Clip.antiAlias,
+                                      child: pickedImageBytes != null
+                                          ? Image.memory(pickedImageBytes!,
+                                              fit: BoxFit.contain)
+                                          : (existingImageUrl != null &&
+                                                  existingImageUrl!.isNotEmpty)
+                                              ? Image.network(
+                                                  existingImageUrl!,
+                                                  fit: BoxFit.contain,
+                                                  errorBuilder: (_, __, ___) =>
+                                                      const Icon(
+                                                          Icons.broken_image),
+                                                )
+                                              : Column(
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment.center,
+                                                  children: const [
+                                                    Icon(
+                                                        Icons
+                                                            .add_a_photo_outlined,
+                                                        size: 38,
+                                                        color: AppColors
+                                                            .primaryBlue),
+                                                    SizedBox(height: 8),
+                                                    Text(
+                                                      'Subir Foto',
+                                                      style: TextStyle(
+                                                        fontSize: 13,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                        color: AppColors
+                                                            .primaryBlue,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                    ),
+                                    if (hasAnyImage)
+                                      Positioned(
+                                        bottom: 6,
+                                        right: 6,
+                                        child: Container(
+                                          padding: const EdgeInsets.all(5),
+                                          decoration: BoxDecoration(
+                                            color:
+                                                Colors.black.withOpacity(0.65),
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                          ),
+                                          child: const Icon(
+                                            Icons.fullscreen_rounded,
+                                            color: Colors.white,
+                                            size: 18,
                                           ),
                                         ),
-                                      ],
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            if (hasAnyImage)
+                              Center(
+                                child: TextButton.icon(
+                                  style: TextButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 2),
+                                    minimumSize: Size.zero,
+                                    tapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                  onPressed: pickNewPhoto,
+                                  icon: const Icon(
+                                      Icons.photo_camera_outlined,
+                                      size: 15),
+                                  label: const Text(
+                                    'Cambiar foto',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
                                     ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    const Center(
-                      child: Text(
-                        'Toca para seleccionar foto desde tu computadora o galería',
-                        style: TextStyle(
-                            fontSize: 11.5, color: AppColors.subtitleGrey),
-                      ),
+                                  ),
+                                ),
+                              )
+                            else
+                              const Center(
+                                child: Text(
+                                  'Toca para seleccionar foto desde tu computadora o galería',
+                                  style: TextStyle(
+                                      fontSize: 11.5,
+                                      color: AppColors.subtitleGrey),
+                                ),
+                              ),
+                          ],
+                        );
+                      },
                     ),
                     const SizedBox(height: 18),
                     TextField(
@@ -266,6 +399,18 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
                       decoration: const InputDecoration(
                         labelText: 'Nombre del insumo',
                         prefixIcon: Icon(Icons.shopping_bag_outlined),
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: descCtrl,
+                      maxLines: 2,
+                      decoration: const InputDecoration(
+                        labelText: 'Descripción del producto (Opcional)',
+                        hintText:
+                            'Vacío = se asignará una descripción automática',
+                        prefixIcon: Icon(Icons.description_outlined),
                         border: OutlineInputBorder(),
                       ),
                     ),
@@ -548,8 +693,14 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
                           parsedTiers.sort((a, b) => (a['min_qty'] as int)
                               .compareTo(b['min_qty'] as int));
 
+                          final rawDesc = descCtrl.text.trim();
+                          final finalDescription = rawDesc.isNotEmpty
+                              ? rawDesc
+                              : '$name en presentación de $unit. Insumo seleccionado para abastecimiento de restaurantes.';
+
                           final Map<String, dynamic> payload = {
                             'name': name,
+                            'description': finalDescription,
                             'price': price,
                             'unit': unit,
                             'category': selectedCategory,
@@ -749,6 +900,18 @@ class _SupplierCatalogViewState extends State<SupplierCatalogView> {
                       color: AppColors.subtitleGrey,
                     ),
                   ),
+                if ((item['description'] ?? '').toString().trim().isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    item['description'].toString().trim(),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: AppColors.subtitleGrey,
+                    ),
+                  ),
+                ],
                   if (item['stock_quantity'] != null) ...[
                   const SizedBox(height: 2),
                   Text(
