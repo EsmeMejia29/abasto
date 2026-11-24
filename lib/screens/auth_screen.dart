@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/session_manager.dart';
 import '../main.dart';
+import '../services/notification_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/error_handler.dart';
 import 'admin/admin_settlements_screen.dart';
@@ -115,11 +116,12 @@ class _AuthScreenState extends State<AuthScreen> {
             bName.contains('distribuidor');
 
         final userRole = isSupplier ? UserRole.supplier : UserRole.restaurant;
-        SessionManager.switchRole(userRole);
-        _role = userRole;
-      }
+                SessionManager.switchRole(userRole);
+                _role = userRole;
+            }
 
-      // Verificación de Onboarding
+            await NotificationService.initializeAndRegisterToken();
+
       if (_role == UserRole.restaurant) {
         final restDetails = await supabase
             .from('restaurant_details')
