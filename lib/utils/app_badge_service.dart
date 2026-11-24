@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../main.dart';
 import '../config/session_manager.dart';
+import '../services/notification_service.dart';
 
 class AppBadgeService {
   static RealtimeChannel? _ordersChannel;
@@ -26,9 +27,17 @@ class AppBadgeService {
           callback: (payload) {
             final supplierId =
                 payload.newRecord['supplier_id']?.toString() ?? '';
+            final orderCode =
+                payload.newRecord['code']?.toString() ?? '';
             debugPrint('[Badge] Nuevo pedido detectado -> supplier_id: $supplierId');
             if (supplierId == uid) {
               incrementBadge();
+              NotificationService.showLocalSystemNotification(
+                'Nuevo pedido recibido',
+                orderCode.isNotEmpty
+                    ? 'Has recibido el pedido $orderCode en Abasto.'
+                    : 'Tienes un nuevo pedido pendiente en Abasto.',
+              );
             }
           },
         )
@@ -46,9 +55,17 @@ class AppBadgeService {
           callback: (payload) {
             final senderId =
                 payload.newRecord['sender_id']?.toString() ?? '';
+            final messageText =
+                payload.newRecord['message']?.toString() ?? '';
             debugPrint('[Badge] Nuevo mensaje detectado -> sender_id: $senderId');
             if (senderId.isNotEmpty && senderId != uid) {
               incrementBadge();
+              NotificationService.showLocalSystemNotification(
+                'Nuevo mensaje en Abasto',
+                messageText.isNotEmpty
+                    ? messageText
+                    : 'Has recibido un mensaje nuevo en el chat.',
+              );
             }
           },
         )
