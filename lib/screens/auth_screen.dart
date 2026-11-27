@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:html' as html;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/session_manager.dart';
@@ -34,11 +36,179 @@ class _AuthScreenState extends State<AuthScreen> {
 
   late UserRole _role;
 
-  @override
-  void initState() {
-    super.initState();
-    _role = widget.initialRole;
-  }
+  String get _draftStorageKey => 'abasto_auth_draft_${_role.name}';
+
+    @override
+    void initState() {
+        super.initState();
+        _role = widget.initialRole;
+        _restoreAuthDraft();
+        _emailCtrl.addListener(_saveAuthDraft);
+        _regBusinessNameCtrl.addListener(_saveAuthDraft);
+        _regEmailCtrl.addListener(_saveAuthDraft);
+        _regReferralCodeCtrl.addListener(_saveAuthDraft);
+    }
+
+    void _restoreAuthDraft() {
+        try {
+            final raw = html.window.localStorage[_draftStorageKey];
+            if (raw == null || raw.isEmpty) return;
+            final data = jsonDecode(raw) as Map<String, dynamic>;
+            if (data['isLogin'] is bool) {
+                _isLogin = data['isLogin'] as bool;
+            }
+            if ((data['email'] ?? '').toString().isNotEmpty) {
+                _emailCtrl.text = data['email'].toString();
+            }
+            if ((data['regBusinessName'] ?? '').toString().isNotEmpty) {
+                _regBusinessNameCtrl.text = data['regBusinessName'].toString();
+            }
+            if ((data['regEmail'] ?? '').toString().isNotEmpty) {
+                _regEmailCtrl.text = data['regEmail'].toString();
+            }
+            if ((data['regReferralCode'] ?? '').toString().isNotEmpty) {
+                _regReferralCodeCtrl.text = data['regReferralCode'].toString();
+            }
+        } catch (_) {}
+    }
+
+    void _saveAuthDraft() {
+        try {
+            final payload = jsonEncode({
+                'isLogin': _isLogin,
+                'email': _emailCtrl.text,
+                'regBusinessName': _regBusinessNameCtrl.text,
+                'regEmail': _regEmailCtrl.text,
+                'regReferralCode': _regReferralCodeCtrl.text,
+            });
+            html.window.localStorage[_draftStorageKey] = payload;
+        } catch (_) {}
+    }
+
+    void _clearAuthDraft() {
+        try {
+            html.window.localStorage.remove(_draftStorageKey);
+        } catch (_) {}
+    }
+
+    Future<void> _showForgotPasswordDialog() async {
+        final resetEmailCtrl = TextEditingController(text: _emailCtrl.text.trim());
+        bool isSending = false;
+
+        await showDialog(
+            context: context,
+            builder: (dialogCtx) {
+                return StatefulBuilder(
+                    builder: (context, setDialogState) {
+                        return AlertDialog(
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                            ),
+                            title: const Text(
+                                'Recuperar contraseña',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.navyDark,
+                                ),
+                            ),
+                            content: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                    const Text(
+                                        'Ingresa tu correo registrado y te enviaremos un enlace para restablecer tu contraseña.',
+                                        style: TextStyle(fontSize: 13),
+                                    ),
+                                    const SizedBox(height: 14),
+                                    TextField(
+                                        controller: resetEmailCtrl,
+                                        keyboardType: TextInputType.emailAddress,
+                                        decoration: const InputDecoration(
+                                            labelText: 'Correo electrónico',
+                                            prefixIcon: Icon(Icons.email_outlined),
+                                            border: OutlineInputBorder(),
+                                            isDense: true,
+                                        ),
+                                    ),
+                                ],
+                            ),
+                            actions: [
+                                TextButton(
+                                    onPressed: isSending
+                                        ? null
+                                        : () => Navigator.pop(dialogCtx),
+                                    child: const Text('Cancelar'),
+                                ),
+                                ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppColors.primaryBlue,
+                                    ),
+                                    onPressed: isSending
+                                        ? null
+                                        : () async {
+                                            final email = resetEmailCtrl.text.trim();
+                                            if (email.isEmpty || !email.contains('@')) {
+                                                ScaffoldMessenger.of(this.context).showSnackBar(
+                                                    const SnackBar(
+                                                        content: Text('Ingresa un correo válido.'),
+                                                        backgroundColor: Colors.red,
+                                                    ),
+                                                );
+                                                return;
+                                            }
+                                            setDialogState(() => isSending = true);
+                                            try {
+                                                await supabase.auth.resetPasswordForEmail(
+                                                    email,
+                                                    redirectTo: Uri.base.origin,
+                                                );
+                                                if (dialogCtx.mounted) {
+                                                    Navigator.pop(dialogCtx);
+                                                }
+                                                if (mounted) {
+                                                    ScaffoldMessenger.of(this.context).showSnackBar(
+                                                        const SnackBar(
+                                                            content: Text(
+                                                                'Enlace enviado. Revisa tu bandeja de entrada o spam.',
+                                                            ),
+                                                            backgroundColor: AppColors.tealMint,
+                                                        ),
+                                                    );
+                                                }
+                                            } catch (e) {
+                                                setDialogState(() => isSending = false);
+                                                if (mounted) {
+                                                    ScaffoldMessenger.of(this.context).showSnackBar(
+                                                        SnackBar(
+                                                            content: Text('Error: $e'),
+                                                            backgroundColor: Colors.red,
+                                                        ),
+                                                    );
+                                                }
+                                            }
+                                        },
+                                    child: isSending
+                                        ? const SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white,
+                                            ),
+                                        )
+                                        : const Text(
+                                            'Enviar enlace',
+                                            style: TextStyle(color: Colors.white),
+                                        ),
+                                ),
+                            ],
+                        );
+                    },
+                );
+            },
+        );
+        resetEmailCtrl.dispose();
+    }
 
   @override
   void dispose() {
@@ -303,9 +473,10 @@ class _AuthScreenState extends State<AuthScreen> {
       await supabase.auth.signOut();
 
       if (mounted) {
-        setState(() {
-          _isLogin = true;
-          _passwordCtrl.clear();
+                _clearAuthDraft();
+                setState(() {
+                    _isLogin = true;
+                    _passwordCtrl.clear();
           _regPasswordCtrl.clear();
           _regBusinessNameCtrl.clear();
           _regEmailCtrl.clear();
@@ -380,7 +551,27 @@ class _AuthScreenState extends State<AuthScreen> {
             border: OutlineInputBorder(),
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 6),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: _showForgotPasswordDialog,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text(
+              '¿Olvidaste tu contraseña?',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.primaryBlue,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 18),
         SizedBox(
           height: 50,
           child: ElevatedButton(
@@ -603,7 +794,10 @@ class _AuthScreenState extends State<AuthScreen> {
                       const SizedBox(height: 16),
                       Center(
                         child: TextButton(
-                          onPressed: () => setState(() => _isLogin = !_isLogin),
+                          onPressed: () {
+                                                setState(() => _isLogin = !_isLogin);
+                                                _saveAuthDraft();
+                                            },
                           child: Text(
                             _isLogin
                                 ? '¿No tienes cuenta? Regístrate aquí'

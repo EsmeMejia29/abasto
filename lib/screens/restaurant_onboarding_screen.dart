@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ui_web' as ui_web;
 import 'dart:html' as html;
 import 'package:flutter/material.dart';
@@ -21,6 +22,7 @@ class _RestaurantOnboardingScreenState
   int _currentStep = 0;
   bool _isSaving = false;
   bool _isLoadingInitialData = true;
+  final ScrollController _scrollController = ScrollController();
 
   // Paso 1: Perfil y Datos Comerciales (Campos solicitados)
   final _businessNameCtrl = TextEditingController(text: 'Mi Restaurante');
@@ -101,11 +103,151 @@ class _RestaurantOnboardingScreenState
     'Harinas y Granos Básicos',
   };
 
+  String get _draftKey => 'abasto_restaurant_onboarding_draft';
+
   @override
   void initState() {
     super.initState();
+    try {
+      html.window.localStorage['abasto_pending_onboarding_role'] = 'restaurant';
+    } catch (_) {}
     _registerMapElement();
-    _loadExistingProfileData();
+    _loadExistingProfileData().then((_) {
+      _restoreOnboardingDraft();
+      _attachDraftListeners();
+    });
+  }
+
+  void _attachDraftListeners() {
+    for (final ctrl in [
+      _businessNameCtrl,
+      _phoneCtrl,
+      _websiteCtrl,
+      _legalNameCtrl,
+      _nrcCtrl,
+      _nitCtrl,
+      _economicActivityCtrl,
+      _businessHoursCtrl,
+      _restaurantTypeCtrl,
+      _customZoneCtrl,
+      _restaurantAddressCtrl,
+      _deliveryAddressCtrl,
+      _deliveryInstructionsCtrl,
+      _searchLocationCtrl,
+    ]) {
+      ctrl.addListener(_saveOnboardingDraft);
+    }
+  }
+
+  void _saveOnboardingDraft() {
+    try {
+      final payload = jsonEncode({
+        'step': _currentStep,
+        'businessName': _businessNameCtrl.text,
+        'phone': _phoneCtrl.text,
+        'website': _websiteCtrl.text,
+        'legalName': _legalNameCtrl.text,
+        'nrc': _nrcCtrl.text,
+        'nit': _nitCtrl.text,
+        'economicActivity': _economicActivityCtrl.text,
+        'businessHours': _businessHoursCtrl.text,
+        'restaurantType': _restaurantTypeCtrl.text,
+        'selectedZone': _selectedZone,
+        'customZone': _customZoneCtrl.text,
+        'restaurantAddress': _restaurantAddressCtrl.text,
+        'sameAddress': _sameAddressForDelivery,
+        'deliveryAddress': _deliveryAddressCtrl.text,
+        'deliveryInstructions': _deliveryInstructionsCtrl.text,
+        'searchLocation': _searchLocationCtrl.text,
+        'deliveryWindow': _deliveryWindow,
+        'selectedSupplies': _selectedSupplies.toList(),
+        'lat': _selectedLat,
+        'lng': _selectedLng,
+      });
+      html.window.localStorage[_draftKey] = payload;
+    } catch (_) {}
+  }
+
+  void _restoreOnboardingDraft() {
+    try {
+      final raw = html.window.localStorage[_draftKey];
+      if (raw == null || raw.isEmpty || !mounted) return;
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      setState(() {
+        if (data['step'] is int) _currentStep = data['step'] as int;
+        if ((data['businessName'] ?? '').toString().isNotEmpty) {
+          _businessNameCtrl.text = data['businessName'].toString();
+        }
+        if ((data['phone'] ?? '').toString().isNotEmpty) {
+          _phoneCtrl.text = data['phone'].toString();
+        }
+        if ((data['website'] ?? '').toString().isNotEmpty) {
+          _websiteCtrl.text = data['website'].toString();
+        }
+        if ((data['legalName'] ?? '').toString().isNotEmpty) {
+          _legalNameCtrl.text = data['legalName'].toString();
+        }
+        if ((data['nrc'] ?? '').toString().isNotEmpty) {
+          _nrcCtrl.text = data['nrc'].toString();
+        }
+        if ((data['nit'] ?? '').toString().isNotEmpty) {
+          _nitCtrl.text = data['nit'].toString();
+        }
+        if ((data['economicActivity'] ?? '').toString().isNotEmpty) {
+          _economicActivityCtrl.text = data['economicActivity'].toString();
+        }
+        if ((data['businessHours'] ?? '').toString().isNotEmpty) {
+          _businessHoursCtrl.text = data['businessHours'].toString();
+        }
+        if ((data['restaurantType'] ?? '').toString().isNotEmpty) {
+          _restaurantTypeCtrl.text = data['restaurantType'].toString();
+        }
+        if ((data['selectedZone'] ?? '').toString().isNotEmpty) {
+          _selectedZone = data['selectedZone'].toString();
+        }
+        if ((data['customZone'] ?? '').toString().isNotEmpty) {
+          _customZoneCtrl.text = data['customZone'].toString();
+        }
+        if ((data['restaurantAddress'] ?? '').toString().isNotEmpty) {
+          _restaurantAddressCtrl.text = data['restaurantAddress'].toString();
+        }
+        if (data['sameAddress'] is bool) {
+          _sameAddressForDelivery = data['sameAddress'] as bool;
+        }
+        if ((data['deliveryAddress'] ?? '').toString().isNotEmpty) {
+          _deliveryAddressCtrl.text = data['deliveryAddress'].toString();
+        }
+        if ((data['deliveryInstructions'] ?? '').toString().isNotEmpty) {
+          _deliveryInstructionsCtrl.text =
+              data['deliveryInstructions'].toString();
+        }
+        if ((data['searchLocation'] ?? '').toString().isNotEmpty) {
+          _searchLocationCtrl.text = data['searchLocation'].toString();
+          _currentMapQuery = '${_searchLocationCtrl.text}, El Salvador';
+        }
+        if ((data['deliveryWindow'] ?? '').toString().isNotEmpty) {
+          _deliveryWindow = data['deliveryWindow'].toString();
+        }
+        if (data['selectedSupplies'] is List) {
+          _selectedSupplies
+            ..clear()
+            ..addAll((data['selectedSupplies'] as List)
+                .map((e) => e.toString()));
+        }
+        if (data['lat'] is num && data['lng'] is num) {
+          _selectedLat = (data['lat'] as num).toDouble();
+          _selectedLng = (data['lng'] as num).toDouble();
+          _currentMapQuery = '$_selectedLat,$_selectedLng';
+        }
+      });
+    } catch (_) {}
+  }
+
+  void _clearOnboardingDraft() {
+    try {
+      html.window.localStorage.remove(_draftKey);
+      html.window.localStorage.remove('abasto_pending_onboarding_role');
+    } catch (_) {}
   }
 
   void _registerMapElement() {
@@ -242,6 +384,7 @@ class _RestaurantOnboardingScreenState
 
   @override
   void dispose() {
+    _scrollController.dispose();
     _businessNameCtrl.dispose();
     _phoneCtrl.dispose();
     _websiteCtrl.dispose();
@@ -330,6 +473,7 @@ class _RestaurantOnboardingScreenState
       });
 
       if (mounted) {
+        _clearOnboardingDraft();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('¡Datos guardados con éxito! Bienvenido a Abasto.'),
@@ -916,6 +1060,7 @@ class _RestaurantOnboardingScreenState
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
+            controller: _scrollController,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 720),
@@ -952,8 +1097,16 @@ class _RestaurantOnboardingScreenState
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                               ),
-                              onPressed: () =>
-                                  setState(() => _currentStep -= 1),
+                              onPressed: () {
+                                FocusScope.of(context).unfocus();
+                                setState(() => _currentStep -= 1);
+                                _saveOnboardingDraft();
+                                WidgetsBinding.instance.addPostFrameCallback((_) {
+                                  if (_scrollController.hasClients) {
+                                    _scrollController.jumpTo(0);
+                                  }
+                                });
+                              },
                               child: const Text('Atrás'),
                             ),
                             const SizedBox(width: 12),
@@ -972,7 +1125,15 @@ class _RestaurantOnboardingScreenState
                                   ? null
                                   : () {
                                       if (_currentStep < 2) {
+                                        FocusScope.of(context).unfocus();
                                         setState(() => _currentStep += 1);
+                                        _saveOnboardingDraft();
+                                        WidgetsBinding.instance
+                                            .addPostFrameCallback((_) {
+                                          if (_scrollController.hasClients) {
+                                            _scrollController.jumpTo(0);
+                                          }
+                                        });
                                       } else {
                                         _completeOnboarding();
                                       }

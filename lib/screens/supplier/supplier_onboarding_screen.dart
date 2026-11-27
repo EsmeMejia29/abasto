@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ui_web' as ui_web;
 import 'dart:html' as html;
 import 'dart:typed_data';
@@ -22,6 +23,7 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
   int _currentStep = 0;
   bool _isSaving = false;
   bool _isLoadingInitialData = true;
+  final ScrollController _scrollController = ScrollController();
 
   // Paso 1: Perfil y Datos Comerciales (Tabla 'profiles')
   final _businessNameCtrl = TextEditingController(text: 'Mi Distribuidora');
@@ -83,12 +85,152 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
   bool _startCatalogFromZero = false;
   final List<Map<String, dynamic>> _initialProducts = [];
 
+  String get _draftKey => 'abasto_supplier_onboarding_draft';
+
   @override
   void initState() {
     super.initState();
+    try {
+      html.window.localStorage['abasto_pending_onboarding_role'] = 'supplier';
+    } catch (_) {}
     _registerMapElement();
     _addProductRow();
-    _loadExistingProfileData();
+    _loadExistingProfileData().then((_) {
+      _restoreOnboardingDraft();
+      _attachDraftListeners();
+    });
+  }
+
+  void _attachDraftListeners() {
+    for (final ctrl in [
+      _businessNameCtrl,
+      _phoneCtrl,
+      _addressCtrl,
+      _legalNameCtrl,
+      _nrcCtrl,
+      _nitCtrl,
+      _economicActivityCtrl,
+      _websiteCtrl,
+      _businessHoursCtrl,
+      _categoryDetailsCtrl,
+      _coverageCtrl,
+      _deliveryDaysCtrl,
+      _minOrderCtrl,
+      _customZoneCtrl,
+      _searchLocationCtrl,
+    ]) {
+      ctrl.addListener(_saveOnboardingDraft);
+    }
+  }
+
+  void _saveOnboardingDraft() {
+    try {
+      final payload = jsonEncode({
+        'step': _currentStep,
+        'businessName': _businessNameCtrl.text,
+        'phone': _phoneCtrl.text,
+        'address': _addressCtrl.text,
+        'legalName': _legalNameCtrl.text,
+        'nrc': _nrcCtrl.text,
+        'nit': _nitCtrl.text,
+        'economicActivity': _economicActivityCtrl.text,
+        'website': _websiteCtrl.text,
+        'businessHours': _businessHoursCtrl.text,
+        'selectedCategories': _selectedCategories.toList(),
+        'categoryDetails': _categoryDetailsCtrl.text,
+        'coverage': _coverageCtrl.text,
+        'deliveryDays': _deliveryDaysCtrl.text,
+        'minOrder': _minOrderCtrl.text,
+        'selectedZone': _selectedZone,
+        'customZone': _customZoneCtrl.text,
+        'searchLocation': _searchLocationCtrl.text,
+        'lat': _selectedLat,
+        'lng': _selectedLng,
+        'startCatalogFromZero': _startCatalogFromZero,
+      });
+      html.window.localStorage[_draftKey] = payload;
+    } catch (_) {}
+  }
+
+  void _restoreOnboardingDraft() {
+    try {
+      final raw = html.window.localStorage[_draftKey];
+      if (raw == null || raw.isEmpty || !mounted) return;
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      setState(() {
+        if (data['step'] is int) _currentStep = data['step'] as int;
+        if ((data['businessName'] ?? '').toString().isNotEmpty) {
+          _businessNameCtrl.text = data['businessName'].toString();
+        }
+        if ((data['phone'] ?? '').toString().isNotEmpty) {
+          _phoneCtrl.text = data['phone'].toString();
+        }
+        if ((data['address'] ?? '').toString().isNotEmpty) {
+          _addressCtrl.text = data['address'].toString();
+        }
+        if ((data['legalName'] ?? '').toString().isNotEmpty) {
+          _legalNameCtrl.text = data['legalName'].toString();
+        }
+        if ((data['nrc'] ?? '').toString().isNotEmpty) {
+          _nrcCtrl.text = data['nrc'].toString();
+        }
+        if ((data['nit'] ?? '').toString().isNotEmpty) {
+          _nitCtrl.text = data['nit'].toString();
+        }
+        if ((data['economicActivity'] ?? '').toString().isNotEmpty) {
+          _economicActivityCtrl.text = data['economicActivity'].toString();
+        }
+        if ((data['website'] ?? '').toString().isNotEmpty) {
+          _websiteCtrl.text = data['website'].toString();
+        }
+        if ((data['businessHours'] ?? '').toString().isNotEmpty) {
+          _businessHoursCtrl.text = data['businessHours'].toString();
+        }
+        if (data['selectedCategories'] is List) {
+          _selectedCategories
+            ..clear()
+            ..addAll((data['selectedCategories'] as List)
+                .map((e) => e.toString()));
+        }
+        if ((data['categoryDetails'] ?? '').toString().isNotEmpty) {
+          _categoryDetailsCtrl.text = data['categoryDetails'].toString();
+        }
+        if ((data['coverage'] ?? '').toString().isNotEmpty) {
+          _coverageCtrl.text = data['coverage'].toString();
+        }
+        if ((data['deliveryDays'] ?? '').toString().isNotEmpty) {
+          _deliveryDaysCtrl.text = data['deliveryDays'].toString();
+        }
+        if ((data['minOrder'] ?? '').toString().isNotEmpty) {
+          _minOrderCtrl.text = data['minOrder'].toString();
+        }
+        if ((data['selectedZone'] ?? '').toString().isNotEmpty) {
+          _selectedZone = data['selectedZone'].toString();
+        }
+        if ((data['customZone'] ?? '').toString().isNotEmpty) {
+          _customZoneCtrl.text = data['customZone'].toString();
+        }
+        if ((data['searchLocation'] ?? '').toString().isNotEmpty) {
+          _searchLocationCtrl.text = data['searchLocation'].toString();
+          _currentMapQuery = '${_searchLocationCtrl.text}, El Salvador';
+        }
+        if (data['lat'] is num && data['lng'] is num) {
+          _selectedLat = (data['lat'] as num).toDouble();
+          _selectedLng = (data['lng'] as num).toDouble();
+          _currentMapQuery = '$_selectedLat,$_selectedLng';
+        }
+        if (data['startCatalogFromZero'] is bool) {
+          _startCatalogFromZero = data['startCatalogFromZero'] as bool;
+        }
+      });
+    } catch (_) {}
+  }
+
+  void _clearOnboardingDraft() {
+    try {
+      html.window.localStorage.remove(_draftKey);
+      html.window.localStorage.remove('abasto_pending_onboarding_role');
+    } catch (_) {}
   }
 
   void _registerMapElement() {
@@ -230,6 +372,7 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
 
   @override
   void dispose() {
+    _scrollController.dispose();
     _businessNameCtrl.dispose();
     _phoneCtrl.dispose();
     _addressCtrl.dispose();
@@ -506,6 +649,7 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
       }
 
       if (mounted) {
+        _clearOnboardingDraft();
         SessionManager.switchRole(UserRole.supplier);
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1468,6 +1612,7 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
+            controller: _scrollController,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 720),
@@ -1504,8 +1649,17 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                               ),
-                              onPressed: () =>
-                                  setState(() => _currentStep -= 1),
+                              onPressed: () {
+                                FocusScope.of(context).unfocus();
+                                setState(() => _currentStep -= 1);
+                                _saveOnboardingDraft();
+                                WidgetsBinding.instance
+                                    .addPostFrameCallback((_) {
+                                  if (_scrollController.hasClients) {
+                                    _scrollController.jumpTo(0);
+                                  }
+                                });
+                              },
                               child: const Text('Atrás'),
                             ),
                             const SizedBox(width: 12),
@@ -1524,7 +1678,15 @@ class _SupplierOnboardingScreenState extends State<SupplierOnboardingScreen> {
                                   ? null
                                   : () {
                                       if (_currentStep < 2) {
+                                        FocusScope.of(context).unfocus();
                                         setState(() => _currentStep += 1);
+                                        _saveOnboardingDraft();
+                                        WidgetsBinding.instance
+                                            .addPostFrameCallback((_) {
+                                          if (_scrollController.hasClients) {
+                                            _scrollController.jumpTo(0);
+                                          }
+                                        });
                                       } else {
                                         _completeOnboarding();
                                       }

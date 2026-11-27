@@ -9,9 +9,11 @@ import 'screens/crm_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/orders_screen.dart';
 import 'screens/profile_screen.dart';
+import 'screens/restaurant_onboarding_screen.dart';
 import 'screens/supplier/supplier_catalog_view.dart';
 import 'screens/supplier/supplier_crm_screen.dart';
 import 'screens/supplier/supplier_incoming_orders_screen.dart';
+import 'screens/supplier/supplier_onboarding_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'theme/app_theme.dart';
 import 'utils/app_badge_service.dart';
@@ -421,7 +423,97 @@ class _AuthGateState extends State<AuthGate> {
   @override
   void initState() {
     super.initState();
+    _listenPasswordRecovery();
     _checkPersistedSession();
+  }
+
+  void _listenPasswordRecovery() {
+    supabase.auth.onAuthStateChange.listen((data) {
+      if (data.event == AuthChangeEvent.passwordRecovery && mounted) {
+        _showNewPasswordDialog();
+      }
+    });
+  }
+
+  Future<void> _showNewPasswordDialog() async {
+    final newPassCtrl = TextEditingController();
+    bool isUpdating = false;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              title: const Text(
+                'Nueva contraseña',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.navyDark,
+                ),
+              ),
+              content: TextField(
+                controller: newPassCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Ingresa tu nueva contraseña (mín. 6 caracteres)',
+                  prefixIcon: Icon(Icons.lock_outline),
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              actions: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primaryBlue,
+                  ),
+                  onPressed: isUpdating
+                      ? null
+                      : () async {
+                          final pass = newPassCtrl.text.trim();
+                          if (pass.length < 6) {
+                            ScaffoldMessenger.of(this.context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Mínimo 6 caracteres.'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            return;
+                          }
+                          setDialogState(() => isUpdating = true);
+                          try {
+                            await supabase.auth.updateUser(
+                              UserAttributes(password: pass),
+                            );
+                            if (dialogCtx.mounted) Navigator.pop(dialogCtx);
+                            if (mounted) {
+                              ScaffoldMessenger.of(this.context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('¡Contraseña actualizada con éxito!'),
+                                  backgroundColor: AppColors.tealMint,
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            setDialogState(() => isUpdating = false);
+                          }
+                        },
+                  child: const Text(
+                    'Guardar contraseña',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    newPassCtrl.dispose();
   }
 
   Future<void> _checkPersistedSession() async {
@@ -454,10 +546,35 @@ class _AuthGateState extends State<AuthGate> {
           roleStr == 'proveedor' ||
           businessName.contains('distribuidor');
 
+      final pendingRole =
+          html.window.localStorage['abasto_pending_onboarding_role'];
+
       if (isSupplier) {
-        _targetScreen = const SupplierNavigationHolder();
+        final supDetails = await supabase
+            .from('supplier_details')
+            .select('onboarding_completed')
+            .eq('profile_id', user.id)
+            .maybeSingle();
+        final bool completed = supDetails?['onboarding_completed'] == true;
+
+        if (!completed || pendingRole == 'supplier') {
+          _targetScreen = SupplierOnboardingScreen(supplierId: user.id);
+        } else {
+          _targetScreen = const SupplierNavigationHolder();
+        }
       } else {
-        _targetScreen = const MainNavigationHolder();
+        final restDetails = await supabase
+            .from('restaurant_details')
+            .select('onboarding_completed')
+            .eq('profile_id', user.id)
+            .maybeSingle();
+        final bool completed = restDetails?['onboarding_completed'] == true;
+
+        if (!completed || pendingRole == 'restaurant') {
+          _targetScreen = RestaurantOnboardingScreen(restaurantId: user.id);
+        } else {
+          _targetScreen = const MainNavigationHolder();
+        }
       }
     } catch (_) {
       _targetScreen = const WelcomeScreen();
